@@ -41,7 +41,9 @@ defmodule Membrane.Element.GCloud.SpeechToText.MixProject do
       {:gcloud_speech_grpc, "~> 0.1.0",
        github: "SoftwareMansion/elixir-gcloud-speech-grpc", branch: "develop"},
       {:ex_doc, "~> 0.21", only: :dev, runtime: false},
-      {:dialyxir, "~> 1.0.0-rc.6", only: [:dev], runtime: false}
+      {:dialyxir, "~> 1.0.0-rc.6", only: :dev, runtime: false},
+      {:membrane_element_file, "~> 0.2", only: [:dev, :test]},
+      {:membrane_element_flac_parser, "~> 0.1", only: [:dev, :test]}
     ]
   end
 
