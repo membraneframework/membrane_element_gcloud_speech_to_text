@@ -36,15 +36,13 @@ defmodule Membrane.Element.GCloud.SpeechToText do
                 See [Google API docs](https://cloud.google.com/speech-to-text/docs/reference/rpc/google.cloud.speech.v1#google.cloud.speech.v1.StreamingRecognitionConfig)
                 for more info.
                 """
-              ],
-              restart_interval: [
-                type: :time,
-                # FIXME possibly can be increased if killing old client earlier
-                # TODO add description
-                default: 150 |> Time.seconds()
               ]
 
   # TODO: maybe add more options
+
+  @client_max_streaming_time 200 |> Time.seconds()
+
+  @client_terminate_after 90 |> Time.seconds()
 
   @impl true
   def handle_init(opts) do
@@ -64,8 +62,8 @@ defmodule Membrane.Element.GCloud.SpeechToText do
 
   @impl true
   def handle_stopped_to_prepared(_ctx, state) do
-    {:ok, client} = Client.start_link()
-    {:ok, %{state | client: client}}
+    state = start_client(state)
+    {:ok, state}
   end
 
   @impl true
@@ -82,13 +80,19 @@ defmodule Membrane.Element.GCloud.SpeechToText do
   @impl true
   def handle_caps(:input, %FLAC{} = caps, _ctx, state) do
     :ok = state.client |> client_start_stream(caps, state)
+
+    Process.send_after(
+      self(),
+      :start_new_client,
+      @client_max_streaming_time |> Time.to_milliseconds()
+    )
+
     {:ok, %{state | init_time: Time.os_time()}}
   end
 
   @impl true
   def handle_write(:input, %Buffer{payload: payload, metadata: metadata}, ctx, state) do
     caps = ctx.pads.input.caps
-    state = maybe_switch_client(caps, state)
     state = update_time(metadata, caps, state)
 
     demand_time =
@@ -108,8 +112,7 @@ defmodule Membrane.Element.GCloud.SpeechToText do
   @impl true
   def handle_event(:input, %EndOfStream{}, ctx, state) do
     info("End of Stream")
-    :ok = state.old_client |> client_maybe_stop()
-    :ok = state.client |> client_end_stream()
+    :ok = state.client |> Client.end_stream()
     super(:input, %EndOfStream{}, ctx, %{state | old_client: nil})
   end
 
@@ -127,43 +130,47 @@ defmodule Membrane.Element.GCloud.SpeechToText do
   def handle_other(%StreamingRecognizeResponse{} = response, _ctx, state) do
     unless response.results |> Enum.empty?() do
       delay = state.time - (response.results |> Enum.map(& &1.result_end_time) |> Enum.max())
-      info("Recognize response delay: #{delay |> Time.to_seconds()} seconds")
+
+      info(
+        "[#{inspect(state.client)}] Recognize response delay: #{delay |> Time.to_seconds()} seconds"
+      )
     end
 
     {{:ok, notify: response}, state}
   end
 
-  defp maybe_switch_client(
-         _caps,
-         %{time: time, restart_interval: interval, restarts: restarts} = state
-       )
-       when time |> div(interval) == restarts do
-    state
+  @impl true
+  def handle_other(:start_new_client, ctx, %{client: old_client} = state) do
+    :ok = old_client |> Client.end_stream()
+    state = start_client(state)
+    :ok = state.client |> client_start_stream(ctx.pads.input.caps, state)
+
+    Process.send_after(
+      self(),
+      {:stop_old_client, old_client},
+      @client_terminate_after |> Time.to_milliseconds()
+    )
+
+    {:ok, state}
   end
 
-  defp maybe_switch_client(caps, state) do
-    :ok = state.old_client |> client_maybe_stop()
-    :ok = state.client |> client_end_stream()
+  @impl true
+  def handle_other({:stop_old_client, old_client}, _ctx, state) do
+    old_client |> Client.stop()
+    info("Stopping old client: #{inspect(old_client)}")
+    {:ok, state}
+  end
 
-    # FIXME Temporary solution making API not return timeout a few seconds after switch
-    Application.stop(:goth)
-    Application.ensure_all_started(:goth)
-
+  defp start_client(state) do
     {:ok, client} = Client.start_link(start_time: state.time)
-    :ok = client |> client_start_stream(caps, state)
-    info("Switching streaming client from #{inspect(state.client)} to #{inspect(client)}")
-
-    %{state | client: client, old_client: state.client, restarts: state.restarts + 1}
+    info("Started new client: #{inspect(client)}")
+    %{state | client: client}
   end
 
   defp update_time(%FLAC.FrameMetadata{} = metadata, %FLAC{} = caps, state) do
     samples = state.samples + metadata.samples
-
-    %{
-      state
-      | samples: samples,
-        time: (samples * Time.second(1)) |> div(caps.sample_rate)
-    }
+    time = (samples * Time.second(1)) |> div(caps.sample_rate)
+    %{state | samples: samples, time: time}
   end
 
   defp update_time(_metadata, _caps, state) do
@@ -188,12 +195,4 @@ defmodule Membrane.Element.GCloud.SpeechToText do
     request = StreamingRecognizeRequest.new(streaming_request: {:streaming_config, str_cfg})
     :ok = client |> Client.send_request(request)
   end
-
-  defp client_end_stream(client) do
-    request = StreamingRecognizeRequest.new(streaming_request: {:audio_content, ""})
-    :ok = client |> Client.send_request(request, end_stream: true)
-  end
-
-  defp client_maybe_stop(nil), do: :ok
-  defp client_maybe_stop(client), do: Client.stop(client)
 end
