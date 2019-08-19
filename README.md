@@ -1,7 +1,5 @@
 # Membrane Multimedia Framework: GCloud Speech To Text
 
-**This element is still experimental. Do not use on production.**
-
 [![Hex.pm](https://img.shields.io/hexpm/v/membrane_element_gcloud_speech_to_text.svg)](https://hex.pm/packages/membrane_element_gcloud_speech_to_text)
 [![CircleCI](https://circleci.com/gh/membraneframework/membrane-element-gcloud-speech-to-text.svg?style=svg)](https://circleci.com/gh/membraneframework/membrane-element-gcloud-speech-to-text)
 
@@ -27,9 +25,64 @@ end
 The input stream for this element should be parsed, so most of the time it should be
 placed in pipeline right after [FLACParser](https://github.com/membraneframework/membrane-element-flac-parser)
 
-// TODO
+Here's an example of pipeline streaming audio file to speech recognition API:
 
-To run, the pipeline requires following dependencies:
+```elixir
+defmodule SpeechRecognition do
+  use Membrane.Pipeline
+
+  alias Google.Cloud.Speech.V1.StreamingRecognizeResponse
+  alias Membrane.Element.{File, FLACParser, GCloud}
+
+  @impl true
+  def handle_init(_) do
+    children = [
+      src: %File.Source{location: "sample.flac"},
+      parser: FLACParser,
+      sink: %GCloud.SpeechToText{
+        interim_results: false,
+        language_code: "en-GB",
+        word_time_offsets: true
+      }
+    ]
+
+    links = %{
+      {:src, :output} => {:parser, :input},
+      {:parser, :output} => {:sink, :input}
+    }
+
+    spec = %Membrane.Pipeline.Spec{
+      children: children,
+      links: links
+    }
+
+    {{:ok, spec}, %{}}
+  end
+
+  @impl true
+  def handle_notification(%StreamingRecognizeResponse{} = response, _element, state) do
+    IO.inspect(response)
+    {:ok, state}
+  end
+
+  def handle_notification(_notification, _element, state) do
+    {:ok, state}
+  end
+end
+```
+
+To run it, you need a `config/config.exs` file with Google credentials:
+
+```elixir
+use Mix.Config
+
+config :goth, json: "a_path/to/google/credentials/creds.json" |> File.read!()
+```
+
+More info on how to configure credentials can be found in [README of Goth library](https://github.com/peburrows/goth#installation)
+used for authentication.
+
+The pipeline also requires following dependencies:
 
 ```elixir
 [
