@@ -86,8 +86,6 @@ defmodule Membrane.Element.GCloud.SpeechToText do
                 """
               ]
 
-  # TODO: maybe add more options
-
   @impl true
   def handle_init(opts) do
     state =

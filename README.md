@@ -1,5 +1,7 @@
 # Membrane Multimedia Framework: GCloud Speech To Text
 
+**This element is still experimental. Do not use on production.**
+
 [![Hex.pm](https://img.shields.io/hexpm/v/membrane_element_gcloud_speech_to_text.svg)](https://hex.pm/packages/membrane_element_gcloud_speech_to_text)
 [![CircleCI](https://circleci.com/gh/membraneframework/membrane-element-gcloud-speech-to-text.svg?style=svg)](https://circleci.com/gh/membraneframework/membrane-element-gcloud-speech-to-text)
 
@@ -37,10 +39,6 @@ To run, the pipeline requires following dependencies:
   {:membrane_element_gcloud_speech_to_text, "~> 0.1"}
 ]
 ```
-
-## Sponsors
-
-This project is sponsored by [Abridge AI, Inc.](https://abridge.ai)
 
 ## Copyright and License
 
