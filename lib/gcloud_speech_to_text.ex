@@ -10,6 +10,7 @@ defmodule Membrane.Element.GCloud.SpeechToText do
 
   alias Google.Cloud.Speech.V1.{
     RecognitionConfig,
+    SpeechContext,
     StreamingRecognitionConfig,
     StreamingRecognizeRequest,
     StreamingRecognizeResponse
@@ -35,6 +36,31 @@ defmodule Membrane.Element.GCloud.SpeechToText do
                 If set to true, the interim results may be returned by recognition API.
                 See [Google API docs](https://cloud.google.com/speech-to-text/docs/reference/rpc/google.cloud.speech.v1#google.cloud.speech.v1.StreamingRecognitionConfig)
                 for more info.
+                """
+              ],
+              word_time_offsets: [
+                type: :boolean,
+                default: false,
+                description: """
+                If `true`, the top result includes a list of words and the start and end time offsets (timestamps) for those words.
+                """
+              ],
+              speech_contexts: [
+                type: :list,
+                spec: [%SpeechContext{}],
+                default: [],
+                description: """
+                A list of speech recognition contexts. See [the docs](https://cloud.google.com/speech-to-text/docs/reference/rpc/google.cloud.speech.v1#google.cloud.speech.v1.RecognitionConfig)
+                for more info.
+                """
+              ],
+              model: [
+                type: :atom,
+                spec: :default | :video | :phone_call | :command_and_search,
+                default: :default,
+                description: """
+                Model used for speech recognition. Bear in mind that `:video` model
+                is a premium model that costs more than the standard rate.
                 """
               ],
               streaming_time_limit: [
@@ -66,6 +92,7 @@ defmodule Membrane.Element.GCloud.SpeechToText do
   def handle_init(opts) do
     state =
       opts
+      |> Map.update!(:model, &Atom.to_string/1)
       |> Map.merge(%{
         client: nil,
         old_client: nil,
@@ -147,7 +174,12 @@ defmodule Membrane.Element.GCloud.SpeechToText do
   @impl true
   def handle_other(%StreamingRecognizeResponse{} = response, _ctx, state) do
     unless response.results |> Enum.empty?() do
-      delay = state.time - (response.results |> Enum.map(& &1.result_end_time) |> Enum.max())
+      received_end_time =
+        response.results
+        |> Enum.map(&(&1.result_end_time |> Time.nanosecond()))
+        |> Enum.max()
+
+      delay = state.time - received_end_time
 
       info(
         "[#{inspect(state.client)}] Recognize response delay: #{delay |> Time.to_seconds()} seconds"
@@ -198,10 +230,13 @@ defmodule Membrane.Element.GCloud.SpeechToText do
   defp client_start_stream(client, caps, state) do
     cfg =
       RecognitionConfig.new(
-        audio_channel_count: caps.channels,
         encoding: :FLAC,
+        sample_rate_hertz: caps.sample_rate,
+        audio_channel_count: caps.channels,
         language_code: state.language_code,
-        sample_rate_hertz: caps.sample_rate
+        speech_contexts: state.speech_contexts,
+        enable_word_time_offsets: state.word_time_offsets,
+        model: state.model
       )
 
     str_cfg =
