@@ -36,13 +36,31 @@ defmodule Membrane.Element.GCloud.SpeechToText do
                 See [Google API docs](https://cloud.google.com/speech-to-text/docs/reference/rpc/google.cloud.speech.v1#google.cloud.speech.v1.StreamingRecognitionConfig)
                 for more info.
                 """
+              ],
+              streaming_time_limit: [
+                type: :time,
+                default: 200 |> Time.seconds(),
+                description: """
+                Determines how much audio can be sent to recognition API in one
+                client session. After this time, a new client session is created
+                while the old one is kept alive for some time to receive recognition
+                results.
+
+                Bear in mind that `streaming_time_limit` + `results_await_time` must
+                be smaller than recognition time limit for Google Streaming API
+                (currently 5 minutes)
+                """
+              ],
+              results_await_time: [
+                type: :time,
+                default: 90 |> Time.seconds(),
+                description: """
+                The amount of time a client that stopped streaming is kept alive
+                awaiting results from recognition API.
+                """
               ]
 
   # TODO: maybe add more options
-
-  @client_max_streaming_time 200 |> Time.seconds()
-
-  @client_terminate_after 90 |> Time.seconds()
 
   @impl true
   def handle_init(opts) do
@@ -84,7 +102,7 @@ defmodule Membrane.Element.GCloud.SpeechToText do
     Process.send_after(
       self(),
       :start_new_client,
-      @client_max_streaming_time |> Time.to_milliseconds()
+      state.streaming_time_limit |> Time.to_milliseconds()
     )
 
     {:ok, %{state | init_time: Time.os_time()}}
@@ -148,7 +166,7 @@ defmodule Membrane.Element.GCloud.SpeechToText do
     Process.send_after(
       self(),
       {:stop_old_client, old_client},
-      @client_terminate_after |> Time.to_milliseconds()
+      state.results_await_time |> Time.to_milliseconds()
     )
 
     {:ok, state}
