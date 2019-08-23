@@ -20,6 +20,19 @@ def deps do
 end
 ```
 
+## Configuration
+
+To use the element you need a `config/config.exs` file with Google credentials:
+
+```elixir
+use Mix.Config
+
+config :goth, json: "a_path/to/google/credentials/creds.json" |> File.read!()
+```
+
+More info on how to configure credentials can be found in [README of Goth library](https://github.com/peburrows/goth#installation)
+used for authentication.
+
 ## Usage
 
 The input stream for this element should be parsed, so most of the time it should be
@@ -71,18 +84,7 @@ defmodule SpeechRecognition do
 end
 ```
 
-To run it, you need a `config/config.exs` file with Google credentials:
-
-```elixir
-use Mix.Config
-
-config :goth, json: "a_path/to/google/credentials/creds.json" |> File.read!()
-```
-
-More info on how to configure credentials can be found in [README of Goth library](https://github.com/peburrows/goth#installation)
-used for authentication.
-
-The pipeline also requires following dependencies:
+The pipeline also requires [a config file](#configuration) and the following dependencies:
 
 ```elixir
 [
@@ -92,6 +94,16 @@ The pipeline also requires following dependencies:
   {:membrane_element_gcloud_speech_to_text, "~> 0.1"}
 ]
 ```
+
+## Testing
+
+Tests tagged `:external` are excluded by default since they contact the real API and require
+configuration of credentials. See [Configuration](#configuration)
+
+## Fixture
+
+A recording fragment in `test/fixtures` comes from an audiobook
+"The adventures of Sherlock Holmes (version 2)" available on [LibriVox](https://librivox.org/the-adventures-of-sherlock-holmes-by-sir-arthur-conan-doyle/)
 
 ## Copyright and License
 

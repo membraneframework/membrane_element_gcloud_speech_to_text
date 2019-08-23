@@ -5,12 +5,14 @@ defmodule RecognitionPipeline do
   alias Membrane.Element.{File, FLACParser, GCloud}
 
   @impl true
-  def handle_init(_) do
+  def handle_init([file, target]) do
     children = [
-      src: %File.Source{location: "sample.flac"},
+      src: %File.Source{location: file},
       parser: FLACParser,
       sink: %GCloud.SpeechToText{
-        language_code: "en-GB"
+        language_code: "en-GB",
+        word_time_offsets: true,
+        interim_results: false
       }
     ]
 
@@ -24,12 +26,17 @@ defmodule RecognitionPipeline do
       links: links
     }
 
-    {{:ok, spec}, %{}}
+    {{:ok, spec}, %{target: target}}
   end
 
   @impl true
   def handle_notification(%StreamingRecognizeResponse{} = response, _element, state) do
-    IO.inspect(response)
+    send(state.target, response)
+    {:ok, state}
+  end
+
+  def handle_notification({:end_of_stream, _pad}, :sink, state) do
+    send(state.target, :end_of_upload)
     {:ok, state}
   end
 
