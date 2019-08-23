@@ -1,4 +1,19 @@
 defmodule Membrane.Element.GCloud.SpeechToText do
+  @moduledoc """
+  An element providing speech recognition via Google Cloud Speech To Text service
+  using Streaming API.
+
+  The element has to handle a connection time limit (currently 5 minutes). It does that
+  by spawning multiple streaming clients - the streaming is stopped after `streaming_time_limit` (see `t:t/0`) and a new client that starts streaming is spawned. The old one is kept alive for `results_await_time` and will receive recognition results for the streamed audio.
+
+  This means that first results from the new client might arrive before the last result
+  from an old client.
+
+  Bear in mind that `streaming_time_limit` + `results_await_time` must
+  be smaller than recognition time limit for Google Streaming API
+  (currently 5 minutes)
+  """
+
   use Membrane.Element.Base.Sink
   use Membrane.Log, tags: :membrane_element_gcloud_stt
 
