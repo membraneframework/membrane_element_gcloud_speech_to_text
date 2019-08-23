@@ -1,4 +1,4 @@
-
+config/*creds.json
 # Created by https://www.gitignore.io/api/c,vim,linux,macos,elixir,windows,visualstudiocode
 # Edit at https://www.gitignore.io/?templates=c,vim,linux,macos,elixir,windows,visualstudiocode
 
