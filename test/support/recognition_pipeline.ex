@@ -5,15 +5,19 @@ defmodule RecognitionPipeline do
   alias Membrane.Element.{File, FLACParser, GCloud}
 
   @impl true
-  def handle_init([file, target]) do
+  def handle_init([file, target, opts]) do
     children = [
       src: %File.Source{location: file},
       parser: FLACParser,
-      sink: %GCloud.SpeechToText{
-        language_code: "en-GB",
-        word_time_offsets: true,
-        interim_results: false
-      }
+      sink:
+        struct!(
+          GCloud.SpeechToText,
+          [
+            language_code: "en-GB",
+            word_time_offsets: true,
+            interim_results: false
+          ] ++ opts
+        )
     ]
 
     links = %{
