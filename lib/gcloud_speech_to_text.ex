@@ -23,6 +23,8 @@ defmodule Membrane.Element.GCloud.SpeechToText do
   alias Membrane.Time
   alias GCloud.SpeechAPI.Streaming.Client
 
+  alias Membrane.Element.GCloud.SpeechToText.SamplesQueue
+
   alias Google.Cloud.Speech.V1.{
     RecognitionConfig,
     SpeechContext,
@@ -99,6 +101,13 @@ defmodule Membrane.Element.GCloud.SpeechToText do
                 The amount of time a client that stopped streaming is kept alive
                 awaiting results from recognition API.
                 """
+              ],
+              reconnection_overlap_time: [
+                type: :time,
+                default: 2 |> Time.seconds(),
+                description: """
+                Duration of audio re-sent in a new client session after reconnection
+                """
               ]
 
   @impl true
@@ -110,9 +119,8 @@ defmodule Membrane.Element.GCloud.SpeechToText do
         client: nil,
         old_client: nil,
         init_time: nil,
-        time: 0,
         samples: 0,
-        restarts: 0
+        overlap_queue: nil
       })
 
     {:ok, state}
@@ -120,7 +128,7 @@ defmodule Membrane.Element.GCloud.SpeechToText do
 
   @impl true
   def handle_stopped_to_prepared(_ctx, state) do
-    state = start_client(state)
+    state = start_client(state, nil)
     {:ok, state}
   end
 
@@ -132,12 +140,14 @@ defmodule Membrane.Element.GCloud.SpeechToText do
   @impl true
   def handle_prepared_to_stopped(_ctx, state) do
     :ok = state.client |> Client.stop()
-    {:ok, %{state | client: nil}}
+    {:ok, %{state | client: nil, samples: 0}}
   end
 
   @impl true
   def handle_caps(:input, %FLAC{} = caps, _ctx, state) do
-    :ok = state.client |> client_start_stream(caps, state)
+    samples_limit = state.reconnection_overlap_time |> time_to_samples(caps)
+    queue = SamplesQueue.new(limit: samples_limit)
+    state = %{state | init_time: Time.os_time(), overlap_queue: queue}
 
     Process.send_after(
       self(),
@@ -145,18 +155,24 @@ defmodule Membrane.Element.GCloud.SpeechToText do
       state.streaming_time_limit |> Time.to_milliseconds()
     )
 
-    {:ok, %{state | init_time: Time.os_time()}}
+    :ok = state.client |> client_start_stream(caps, state)
+
+    {:ok, state}
   end
 
   @impl true
   def handle_write(:input, %Buffer{payload: payload, metadata: metadata}, ctx, state) do
     caps = ctx.pads.input.caps
-    state = update_time(metadata, caps, state)
+    buffer_samples = metadata |> Map.get(:samples, 0)
+    state = %{state | samples: state.samples + buffer_samples}
+    streamed_audio_time = samples_to_time(state.samples, caps)
 
     demand_time =
-      (state.init_time + state.time - Time.os_time()) |> max(0) |> Time.to_milliseconds()
+      (state.init_time + streamed_audio_time - Time.os_time()) |> max(0) |> Time.to_milliseconds()
 
     Process.send_after(self(), :demand_frame, demand_time)
+
+    q = state.overlap_queue |> SamplesQueue.push(payload, buffer_samples)
 
     :ok =
       Client.send_request(
@@ -164,7 +180,7 @@ defmodule Membrane.Element.GCloud.SpeechToText do
         StreamingRecognizeRequest.new(streaming_request: {:audio_content, payload})
       )
 
-    {:ok, state}
+    {:ok, %{state | overlap_queue: q}}
   end
 
   @impl true
@@ -185,14 +201,16 @@ defmodule Membrane.Element.GCloud.SpeechToText do
   end
 
   @impl true
-  def handle_other(%StreamingRecognizeResponse{} = response, _ctx, state) do
+  def handle_other(%StreamingRecognizeResponse{} = response, ctx, state) do
     unless response.results |> Enum.empty?() do
       received_end_time =
         response.results
         |> Enum.map(&(&1.result_end_time |> Time.nanosecond()))
         |> Enum.max()
 
-      delay = state.time - received_end_time
+      caps = ctx.pads.input.caps
+      streamed_audio_time = samples_to_time(state.samples, caps)
+      delay = streamed_audio_time - received_end_time
 
       info(
         "[#{inspect(state.client)}] Recognize response delay: #{delay |> Time.to_seconds()} seconds"
@@ -205,7 +223,8 @@ defmodule Membrane.Element.GCloud.SpeechToText do
   @impl true
   def handle_other(:start_new_client, ctx, %{client: old_client} = state) do
     :ok = old_client |> Client.end_stream()
-    state = start_client(state)
+    start_from_sample = state.samples - SamplesQueue.samples(state.overlap_queue)
+    state = start_client(state, ctx.pads.input.caps, start_from_sample)
     :ok = state.client |> client_start_stream(ctx.pads.input.caps, state)
 
     Process.send_after(
@@ -224,20 +243,46 @@ defmodule Membrane.Element.GCloud.SpeechToText do
     {:ok, state}
   end
 
-  defp start_client(state) do
-    {:ok, client} = Client.start_link(start_time: state.time)
+  @impl true
+  def handle_other({:DOWN, _ref, :prcess, pid, _reason}, ctx, %{client: pid} = state) do
+    caps = ctx.pads.input.caps
+    state = start_client(state, caps)
+    :ok = state.client |> client_start_stream(caps, state)
+    # TODO: audio re-upload
+    {:ok, state}
+  end
+
+  defp start_client(state, caps) do
+    start_client(state, caps, state.samples)
+  end
+
+  defp start_client(state, caps, start_from_sample) do
+    start_time =
+      if caps == nil do
+        0
+      else
+        samples_to_time(start_from_sample, caps)
+      end
+
+    accuracy = Time.milliseconds(100)
+
+    # It seems Google Speech is using low accuracy when providing time offsets
+    # for the recognized words. In order to keep them aligned between client
+    # sessions, we need to round the offset
+    start_time = start_time |> Kernel./(accuracy) |> round |> Kernel.*(accuracy)
+    {:ok, client} = Client.start(start_time: start_time)
+    Process.monitor(client)
     info("Started new client: #{inspect(client)}")
     %{state | client: client}
   end
 
-  defp update_time(%FLAC.FrameMetadata{} = metadata, %FLAC{} = caps, state) do
-    samples = state.samples + metadata.samples
-    time = (samples * Time.second(1)) |> div(caps.sample_rate)
-    %{state | samples: samples, time: time}
+  defp samples_to_time(samples, %FLAC{} = caps) do
+    (samples * Time.second(1)) |> div(caps.sample_rate)
   end
 
-  defp update_time(_metadata, _caps, state) do
-    state
+  defp time_to_samples(time, %FLAC{} = caps) do
+    (time * caps.sample_rate)
+    |> div(1 |> Time.second())
   end
 
   defp client_start_stream(client, caps, state) do
@@ -260,5 +305,14 @@ defmodule Membrane.Element.GCloud.SpeechToText do
 
     request = StreamingRecognizeRequest.new(streaming_request: {:streaming_config, str_cfg})
     :ok = client |> Client.send_request(request)
+
+    state.overlap_queue
+    |> SamplesQueue.to_list()
+    |> Enum.each(
+      &Client.send_request(
+        state.client,
+        StreamingRecognizeRequest.new(streaming_request: {:audio_content, &1})
+      )
+    )
   end
 end
