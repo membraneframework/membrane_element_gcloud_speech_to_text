@@ -216,6 +216,11 @@ defmodule Membrane.Element.GCloud.SpeechToText do
   end
 
   @impl true
+  def handle_other(:start_new_client, %{pads: %{input: %{end_of_stream?: true}}}, state) do
+    {:ok, state}
+  end
+
+  @impl true
   def handle_other(:start_new_client, ctx, %{client: old_client} = state) do
     :ok = old_client |> Client.end_stream()
     state.client_monitor |> Process.demonitor()
