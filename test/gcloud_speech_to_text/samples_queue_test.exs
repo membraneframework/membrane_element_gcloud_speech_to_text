@@ -17,16 +17,6 @@ defmodule Membrane.Element.GCloud.SpeechToText.SamplesQueueTest do
     assert result.limit == 100
   end
 
-  test "push to empty queue" do
-    result =
-      SamplesQueue.new()
-      |> SamplesQueue.push("a", 50)
-
-    assert %SamplesQueue{} = result
-    assert Enum.to_list(result.q) == [{50, "a"}]
-    assert result.total == 50
-  end
-
   test "push beyond limit" do
     result =
       SamplesQueue.new(limit: 100)
@@ -95,8 +85,11 @@ defmodule Membrane.Element.GCloud.SpeechToText.SamplesQueueTest do
   end
 
   test "to_list" do
+    sq = SamplesQueue.new()
+    assert sq |> SamplesQueue.to_list() == []
+
     sq =
-      SamplesQueue.new()
+      sq
       |> SamplesQueue.push("a", 50)
       |> SamplesQueue.push("b", 30)
       |> SamplesQueue.push("c", 15)
@@ -107,6 +100,9 @@ defmodule Membrane.Element.GCloud.SpeechToText.SamplesQueueTest do
   test "flush" do
     empty = SamplesQueue.new(limit: 150)
 
+    assert {[], new_queue} = empty |> SamplesQueue.flush()
+    assert new_queue == empty
+
     sq =
       empty
       |> SamplesQueue.push("a", 50)
@@ -116,5 +112,32 @@ defmodule Membrane.Element.GCloud.SpeechToText.SamplesQueueTest do
     assert {payload, new_queue} = sq |> SamplesQueue.flush()
     assert payload == ["a", "b", "c"]
     assert new_queue == empty
+  end
+
+  describe "empty queue: " do
+    setup do
+      [empty: SamplesQueue.new(limit: 150)]
+    end
+
+    test "push", %{empty: empty} do
+      result = empty |> SamplesQueue.push("a", 50)
+
+      assert %SamplesQueue{} = result
+      assert Enum.to_list(result.q) == [{50, "a"}]
+      assert result.total == 50
+    end
+
+    test "pop", %{empty: empty} do
+      assert empty |> SamplesQueue.pop_by_samples(20) == {{:empty, []}, empty}
+    end
+
+    test "to_list", %{empty: empty} do
+      assert empty |> SamplesQueue.to_list() == []
+    end
+
+    test "flush", %{empty: empty} do
+      assert {[], new_queue} = empty |> SamplesQueue.flush()
+      assert new_queue == empty
+    end
   end
 end
