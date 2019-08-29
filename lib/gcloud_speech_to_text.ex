@@ -117,6 +117,7 @@ defmodule Membrane.Element.GCloud.SpeechToText do
       |> Map.update!(:model, &Atom.to_string/1)
       |> Map.merge(%{
         client: nil,
+        client_monitor: nil,
         old_client: nil,
         init_time: nil,
         samples: 0,
@@ -148,12 +149,6 @@ defmodule Membrane.Element.GCloud.SpeechToText do
     samples_limit = state.reconnection_overlap_time |> time_to_samples(caps)
     queue = SamplesQueue.new(limit: samples_limit)
     state = %{state | init_time: Time.os_time(), overlap_queue: queue}
-
-    Process.send_after(
-      self(),
-      :start_new_client,
-      state.streaming_time_limit |> Time.to_milliseconds()
-    )
 
     :ok = state.client |> client_start_stream(caps, state)
 
@@ -221,8 +216,14 @@ defmodule Membrane.Element.GCloud.SpeechToText do
   end
 
   @impl true
+  def handle_other(:start_new_client, %{pads: %{input: %{end_of_stream?: true}}}, state) do
+    {:ok, state}
+  end
+
+  @impl true
   def handle_other(:start_new_client, ctx, %{client: old_client} = state) do
     :ok = old_client |> Client.end_stream()
+    state.client_monitor |> Process.demonitor()
     start_from_sample = state.samples - SamplesQueue.samples(state.overlap_queue)
     state = start_client(state, ctx.pads.input.caps, start_from_sample)
     :ok = state.client |> client_start_stream(ctx.pads.input.caps, state)
@@ -271,9 +272,9 @@ defmodule Membrane.Element.GCloud.SpeechToText do
     # sessions, we need to round the offset
     start_time = start_time |> Kernel./(accuracy) |> round |> Kernel.*(accuracy)
     {:ok, client} = Client.start(start_time: start_time)
-    Process.monitor(client)
+    monitor = Process.monitor(client)
     info("Started new client: #{inspect(client)}")
-    %{state | client: client}
+    %{state | client: client, client_monitor: monitor}
   end
 
   defp samples_to_time(samples, %FLAC{} = caps) do
@@ -286,6 +287,12 @@ defmodule Membrane.Element.GCloud.SpeechToText do
   end
 
   defp client_start_stream(client, caps, state) do
+    Process.send_after(
+      self(),
+      :start_new_client,
+      state.streaming_time_limit |> Time.to_milliseconds()
+    )
+
     cfg =
       RecognitionConfig.new(
         encoding: :FLAC,
