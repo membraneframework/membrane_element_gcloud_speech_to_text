@@ -271,7 +271,7 @@ defmodule Membrane.Element.GCloud.SpeechToText do
     # for the recognized words. In order to keep them aligned between client
     # sessions, we need to round the offset
     start_time = start_time |> Kernel./(accuracy) |> round |> Kernel.*(accuracy)
-    {:ok, client} = Client.start(start_time: start_time)
+    {:ok, client} = Client.start(start_time: start_time, monitor_target: true)
     monitor = Process.monitor(client)
     info("Started new client: #{inspect(client)}")
     %{state | client: client, client_monitor: monitor}
