@@ -149,12 +149,6 @@ defmodule Membrane.Element.GCloud.SpeechToText do
     queue = SamplesQueue.new(limit: samples_limit)
     state = %{state | init_time: Time.os_time(), overlap_queue: queue}
 
-    Process.send_after(
-      self(),
-      :start_new_client,
-      state.streaming_time_limit |> Time.to_milliseconds()
-    )
-
     :ok = state.client |> client_start_stream(caps, state)
 
     {:ok, state}
@@ -286,6 +280,12 @@ defmodule Membrane.Element.GCloud.SpeechToText do
   end
 
   defp client_start_stream(client, caps, state) do
+    Process.send_after(
+      self(),
+      :start_new_client,
+      state.streaming_time_limit |> Time.to_milliseconds()
+    )
+
     cfg =
       RecognitionConfig.new(
         encoding: :FLAC,
