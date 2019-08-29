@@ -145,7 +145,9 @@ defmodule Membrane.Element.GCloud.SpeechToText do
 
   @impl true
   def handle_caps(:input, %FLAC{} = caps, _ctx, state) do
-    :ok = state.client |> client_start_stream(caps, state)
+    samples_limit = state.reconnection_overlap_time |> time_to_samples(caps)
+    queue = SamplesQueue.new(limit: samples_limit)
+    state = %{state | init_time: Time.os_time(), overlap_queue: queue}
 
     Process.send_after(
       self(),
@@ -153,13 +155,9 @@ defmodule Membrane.Element.GCloud.SpeechToText do
       state.streaming_time_limit |> Time.to_milliseconds()
     )
 
-    samples =
-      (state.reconnection_overlap_time * caps.sample_rate)
-      |> div(1 |> Time.second())
+    :ok = state.client |> client_start_stream(caps, state)
 
-    queue = SamplesQueue.new(limit: samples)
-
-    {:ok, %{state | init_time: Time.os_time(), overlap_queue: queue}}
+    {:ok, state}
   end
 
   @impl true
@@ -229,15 +227,6 @@ defmodule Membrane.Element.GCloud.SpeechToText do
     state = start_client(state, ctx.pads.input.caps, start_from_sample)
     :ok = state.client |> client_start_stream(ctx.pads.input.caps, state)
 
-    state.overlap_queue
-    |> SamplesQueue.to_list()
-    |> Enum.each(
-      &Client.send_request(
-        state.client,
-        StreamingRecognizeRequest.new(streaming_request: {:audio_content, &1})
-      )
-    )
-
     Process.send_after(
       self(),
       {:stop_old_client, old_client},
@@ -268,7 +257,13 @@ defmodule Membrane.Element.GCloud.SpeechToText do
   end
 
   defp start_client(state, caps, start_from_sample) do
-    start_time = samples_to_time(start_from_sample, caps)
+    start_time =
+      if caps == nil do
+        0
+      else
+        samples_to_time(start_from_sample, caps)
+      end
+
     accuracy = Time.milliseconds(100)
 
     # It seems Google Speech is using low accuracy when providing time offsets
@@ -281,12 +276,13 @@ defmodule Membrane.Element.GCloud.SpeechToText do
     %{state | client: client}
   end
 
-  defp samples_to_time(_, nil) do
-    0
-  end
-
   defp samples_to_time(samples, %FLAC{} = caps) do
     (samples * Time.second(1)) |> div(caps.sample_rate)
+  end
+
+  defp time_to_samples(time, %FLAC{} = caps) do
+    (time * caps.sample_rate)
+    |> div(1 |> Time.second())
   end
 
   defp client_start_stream(client, caps, state) do
@@ -309,5 +305,14 @@ defmodule Membrane.Element.GCloud.SpeechToText do
 
     request = StreamingRecognizeRequest.new(streaming_request: {:streaming_config, str_cfg})
     :ok = client |> Client.send_request(request)
+
+    state.overlap_queue
+    |> SamplesQueue.to_list()
+    |> Enum.each(
+      &Client.send_request(
+        state.client,
+        StreamingRecognizeRequest.new(streaming_request: {:audio_content, &1})
+      )
+    )
   end
 end
