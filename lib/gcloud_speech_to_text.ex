@@ -197,22 +197,28 @@ defmodule Membrane.Element.GCloud.SpeechToText do
 
   @impl true
   def handle_other(%StreamingRecognizeResponse{} = response, ctx, state) do
+    caps = ctx.pads.input.caps
+    streamed_audio_time = samples_to_time(state.samples, caps)
+    log_prefix = "[#{inspect(state.client)}] [#{streamed_audio_time |> Time.to_milliseconds()}]"
+
     unless response.results |> Enum.empty?() do
       received_end_time =
         response.results
         |> Enum.map(&(&1.result_end_time |> Time.nanosecond()))
         |> Enum.max()
 
-      caps = ctx.pads.input.caps
-      streamed_audio_time = samples_to_time(state.samples, caps)
       delay = streamed_audio_time - received_end_time
 
-      info(
-        "[#{inspect(state.client)}] Recognize response delay: #{delay |> Time.to_seconds()} seconds"
-      )
+      info("#{log_prefix} Recognize response delay: #{delay |> Time.to_milliseconds()} ms")
     end
 
-    {{:ok, notify: response}, state}
+    if response.error != nil do
+      warn("#{log_prefix}: #{inspect(response.error)}")
+
+      {:ok, state}
+    else
+      {{:ok, notify: response}, state}
+    end
   end
 
   @impl true
@@ -239,17 +245,27 @@ defmodule Membrane.Element.GCloud.SpeechToText do
 
   @impl true
   def handle_other({:stop_old_client, old_client}, _ctx, state) do
-    old_client |> Client.stop()
-    info("Stopping old client: #{inspect(old_client)}")
+    if Process.alive?(old_client) do
+      old_client |> Client.stop()
+      info("Stopped old client: #{inspect(old_client)}")
+    end
+
     {:ok, state}
   end
 
   @impl true
-  def handle_other({:DOWN, _ref, :prcess, pid, _reason}, ctx, %{client: pid} = state) do
+  def handle_other({:DOWN, _ref, :process, pid, reason}, ctx, %{client: pid} = state) do
+    warn("Client #{inspect(pid)} down with reason: #{inspect(reason)}")
     caps = ctx.pads.input.caps
     state = start_client(state, caps)
     :ok = state.client |> client_start_stream(caps, state)
     # TODO: audio re-upload
+    {:ok, state}
+  end
+
+  @impl true
+  def handle_other({:DOWN, _ref, :process, pid, reason}, _ctx, state) do
+    info("Old client #{inspect(pid)} down with reason #{inspect(reason)}")
     {:ok, state}
   end
 
@@ -270,10 +286,10 @@ defmodule Membrane.Element.GCloud.SpeechToText do
     # It seems Google Speech is using low accuracy when providing time offsets
     # for the recognized words. In order to keep them aligned between client
     # sessions, we need to round the offset
-    start_time = start_time |> Kernel./(accuracy) |> round |> Kernel.*(accuracy)
-    {:ok, client} = Client.start(start_time: start_time, monitor_target: true)
+    rounded_start_time = start_time |> Kernel./(accuracy) |> round() |> Kernel.*(accuracy)
+    {:ok, client} = Client.start(start_time: rounded_start_time, monitor_target: true)
     monitor = Process.monitor(client)
-    info("Started new client: #{inspect(client)}")
+    info("[#{start_time}] Started new client: #{inspect(client)}")
     %{state | client: client, client_monitor: monitor}
   end
 

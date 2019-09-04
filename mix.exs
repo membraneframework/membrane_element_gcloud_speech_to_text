@@ -36,7 +36,7 @@ defmodule Membrane.Element.GCloud.SpeechToText.MixProject do
 
   defp deps do
     [
-      {:membrane_core, "~> 0.3.0"},
+      {:membrane_core, "~> 0.3.2"},
       {:membrane_caps_audio_flac, "~> 0.1.1"},
       {:gcloud_speech_grpc, "~> 0.2.0"},
       {:qex, "~> 0.5"},
