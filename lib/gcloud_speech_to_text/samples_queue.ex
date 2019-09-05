@@ -60,33 +60,33 @@ defmodule Membrane.Element.GCloud.SpeechToText.SamplesQueue do
   end
 
   @doc """
-  Pops payloads from the queue with a total number of samples greater than the provided number.
+  Drops payloads from the queue with a total number of samples lesser or equal to the provided number.
 
-  Returns `{{:empty, [payloads]}, timed_queue` if there wasn't enough data stored in queue to provide the requested number of samples, `{{:values, [payloads]}, timed_queue}` otherwise.
+  In other words, marks the provided number of samples as disposable and drops the payloads
+  that contain only disposable samples.
+
+  Returns a tuple with the number of dropped samples and updated queue.
   """
-  @spec pop_by_samples(t(), samples_num()) :: {{:empty | :values, [Payload.t()]}, t()}
-  def pop_by_samples(%__MODULE__{} = timed_queue, samples) do
+  @spec drop_by_samples(t(), samples_num()) :: {samples_num(), t()}
+  def drop_by_samples(%__MODULE__{} = timed_queue, samples) do
     do_pop_by_samples(timed_queue, samples)
   end
 
-  defp do_pop_by_samples(timed_queue, samples, acc \\ [])
-
-  defp do_pop_by_samples(%__MODULE__{} = timed_queue, samples, acc) when samples <= 0 do
-    {{:values, acc |> Enum.reverse()}, timed_queue}
-  end
-
-  defp do_pop_by_samples(%__MODULE__{q: q} = timed_queue, samples_to_pop, acc) do
-    {popped, q} = q |> Qex.pop()
-    timed_queue = timed_queue |> Map.put(:q, q)
+  defp do_pop_by_samples(%__MODULE__{q: q} = timed_queue, samples_to_drop, acc \\ 0) do
+    {popped, new_q} = q |> Qex.pop()
 
     case popped do
       :empty ->
-        {{:empty, acc |> Enum.reverse()}, timed_queue}
+        {acc, timed_queue}
 
-      {:value, {samples, payload}} ->
+      {:value, {samples, _payload}} when samples_to_drop < samples ->
+        {acc, timed_queue}
+
+      {:value, {samples, _payload}} ->
         timed_queue
         |> Map.update!(:total, &(&1 - samples))
-        |> do_pop_by_samples(samples_to_pop - samples, [payload | acc])
+        |> Map.put(:q, new_q)
+        |> do_pop_by_samples(samples_to_drop - samples, acc + samples)
     end
   end
 

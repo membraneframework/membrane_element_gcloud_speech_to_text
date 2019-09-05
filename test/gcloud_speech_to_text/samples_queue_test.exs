@@ -55,7 +55,7 @@ defmodule Membrane.Element.GCloud.SpeechToText.SamplesQueueTest do
     assert result.limit == 100
   end
 
-  test "pop_by_samples" do
+  test "drop_by_samples" do
     sq =
       SamplesQueue.new(limit: 150)
       |> SamplesQueue.push("a", 50)
@@ -63,23 +63,23 @@ defmodule Membrane.Element.GCloud.SpeechToText.SamplesQueueTest do
       |> SamplesQueue.push("c", 15)
       |> SamplesQueue.push("d", 40)
 
-    assert {{:values, res}, new_sq} = sq |> SamplesQueue.pop_by_samples(50)
-    assert res == ["a"]
+    assert {0, new_sq} = sq |> SamplesQueue.drop_by_samples(49)
+    assert Enum.to_list(new_sq.q) == [{50, "a"}, {30, "b"}, {15, "c"}, {40, "d"}]
+    assert new_sq.total == 135
+
+    assert {50, new_sq} = sq |> SamplesQueue.drop_by_samples(50)
     assert Enum.to_list(new_sq.q) == [{30, "b"}, {15, "c"}, {40, "d"}]
     assert new_sq.total == 85
 
-    assert {{:values, res}, new_sq} = sq |> SamplesQueue.pop_by_samples(51)
-    assert res == ["a", "b"]
-    assert Enum.to_list(new_sq.q) == [{15, "c"}, {40, "d"}]
-    assert new_sq.total == 55
+    assert {50, new_sq} = sq |> SamplesQueue.drop_by_samples(51)
+    assert Enum.to_list(new_sq.q) == [{30, "b"}, {15, "c"}, {40, "d"}]
+    assert new_sq.total == 85
 
-    assert {{:values, res}, new_sq} = sq |> SamplesQueue.pop_by_samples(135)
-    assert res == ["a", "b", "c", "d"]
+    assert {135, new_sq} = sq |> SamplesQueue.drop_by_samples(135)
     assert Enum.to_list(new_sq.q) == []
     assert new_sq.total == 0
 
-    assert {{:empty, res}, new_sq} = sq |> SamplesQueue.pop_by_samples(140)
-    assert res == ["a", "b", "c", "d"]
+    assert {135, new_sq} = sq |> SamplesQueue.drop_by_samples(140)
     assert Enum.to_list(new_sq.q) == []
     assert new_sq.total == 0
   end
@@ -127,8 +127,8 @@ defmodule Membrane.Element.GCloud.SpeechToText.SamplesQueueTest do
       assert result.total == 50
     end
 
-    test "pop", %{empty: empty} do
-      assert empty |> SamplesQueue.pop_by_samples(20) == {{:empty, []}, empty}
+    test "drop_by_samples", %{empty: empty} do
+      assert empty |> SamplesQueue.drop_by_samples(20) == {0, empty}
     end
 
     test "to_list", %{empty: empty} do
