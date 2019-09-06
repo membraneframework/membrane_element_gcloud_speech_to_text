@@ -133,8 +133,8 @@ defmodule Membrane.Element.GCloud.SpeechToText do
 
   @impl true
   def handle_stopped_to_prepared(_ctx, state) do
-    state = start_client(state, nil)
-    {:ok, state}
+    client = start_client(state, nil)
+    {:ok, %{state | client: client}}
   end
 
   @impl true
@@ -152,9 +152,9 @@ defmodule Membrane.Element.GCloud.SpeechToText do
   def handle_caps(:input, %FLAC{} = caps, _ctx, state) do
     samples_limit = state.reconnection_overlap_time |> time_to_samples(caps)
     queue = SamplesQueue.new(limit: samples_limit)
-    state = %{state | init_time: Time.os_time(), overlap_queue: queue}
+    state = %{state | init_time: Time.vm_time(), overlap_queue: queue}
 
-    :ok = state |> client_start_stream(caps)
+    :ok = client_start_stream(state.client, caps, state)
 
     {:ok, state}
   end
@@ -167,7 +167,7 @@ defmodule Membrane.Element.GCloud.SpeechToText do
     streamed_audio_time = samples_to_time(state.samples, caps)
 
     demand_time =
-      (state.init_time + streamed_audio_time - Time.os_time()) |> max(0) |> Time.to_milliseconds()
+      (state.init_time + streamed_audio_time - Time.vm_time()) |> max(0) |> Time.to_milliseconds()
 
     Process.send_after(self(), :demand_frame, demand_time)
 
@@ -240,14 +240,15 @@ defmodule Membrane.Element.GCloud.SpeechToText do
   @impl true
   def handle_other(:start_new_client, ctx, %{client: old_client} = state) do
     :ok = old_client.pid |> Client.end_stream()
-    old_client.monitor |> Process.demonitor()
+
     start_from_sample = state.samples - SamplesQueue.samples(state.overlap_queue)
-    state = start_client(state, ctx.pads.input.caps, start_from_sample)
-    :ok = state |> client_start_stream(ctx.pads.input.caps)
+    client = start_client(state, ctx.pads.input.caps, start_from_sample)
+    state = %{state | client: client}
+    :ok = client_start_stream(client, ctx.pads.input.caps, state)
 
     Process.send_after(
       self(),
-      {:stop_old_client, old_client},
+      {:stop_old_client, old_client.pid, old_client.monitor},
       state.results_await_time |> Time.to_milliseconds()
     )
 
@@ -255,10 +256,11 @@ defmodule Membrane.Element.GCloud.SpeechToText do
   end
 
   @impl true
-  def handle_other({:stop_old_client, %{pid: old_client}}, _ctx, state) do
-    if Process.alive?(old_client) do
-      old_client |> Client.stop()
-      info("Stopped old client: #{inspect(old_client)}")
+  def handle_other({:stop_old_client, pid, monitor}, _ctx, state) do
+    if Process.alive?(pid) do
+      monitor |> Process.demonitor()
+      pid |> Client.stop()
+      info("Stopped old client: #{inspect(pid)}")
       {:ok, %{state | old_client: nil}}
     else
       {:ok, state}
@@ -274,20 +276,53 @@ defmodule Membrane.Element.GCloud.SpeechToText do
     warn("Client #{inspect(pid)} down with reason: #{inspect(reason)}")
     caps = ctx.pads.input.caps
 
-    state = start_client(state, caps, dead_client.queue_start)
-    state = put_in(state.client.failure_q, dead_client.failure_q)
+    client =
+      start_client(state, caps, dead_client.queue_start)
+      |> Map.put(:failure_q, dead_client.failure_q)
+
+    state = %{state | client: client}
 
     unless caps == nil do
-      :ok = state |> client_start_stream(caps)
+      :ok = client_start_stream(client, caps, state)
     end
 
     {:ok, state}
   end
 
   @impl true
-  def handle_other({:DOWN, _ref, :process, pid, reason}, _ctx, state) do
+  def handle_other(
+        {:DOWN, _ref, :process, pid, reason},
+        ctx,
+        %{old_client: %{pid: pid} = dead_client} = state
+      ) do
     info("Old client #{inspect(pid)} down with reason #{inspect(reason)}")
-    {:ok, state}
+    caps = ctx.pads.input.caps
+
+    limit = 1 |> Time.second() |> time_to_samples(caps)
+
+    # TODO: analyze and remove caps test
+    if caps != nil and dead_client.failure_q |> SamplesQueue.samples() > limit do
+      client =
+        start_client(state, caps, dead_client.queue_start)
+        |> Map.put(:failure_q, dead_client.failure_q)
+
+      state = %{state | old_client: client}
+
+      :ok = client_start_stream(client, caps, state)
+      :ok = client.pid |> Client.end_stream()
+
+      Process.send_after(
+        self(),
+        {:stop_old_client, client.pid, client.monitor},
+        state.results_await_time |> Time.to_milliseconds()
+      )
+
+      {:ok, state}
+    else
+      # We're close enough to the end or haven't streamed anything,
+      # don't restart the client
+      {:ok, %{state | old_client: nil}}
+    end
   end
 
   defp start_client(state, caps) do
@@ -310,7 +345,7 @@ defmodule Membrane.Element.GCloud.SpeechToText do
     rounded_start_time = start_time |> Kernel./(accuracy) |> round() |> Kernel.*(accuracy)
     {:ok, client_pid} = Client.start(start_time: rounded_start_time, monitor_target: true)
     monitor = Process.monitor(client_pid)
-    info("[#{start_time}] Started new client: #{inspect(client_pid)}")
+    info("[#{start_time |> Time.to_milliseconds()}] Started new client: #{inspect(client_pid)}")
 
     failure_q =
       case state.overlap_queue do
@@ -318,14 +353,12 @@ defmodule Membrane.Element.GCloud.SpeechToText do
         %SamplesQueue{} = q -> %{q | limit: :infinity}
       end
 
-    client = %{
+    %{
       pid: client_pid,
       queue_start: start_from_sample,
       failure_q: failure_q,
       monitor: monitor
     }
-
-    %{state | client: client}
   end
 
   defp samples_to_time(samples, %FLAC{} = caps) do
@@ -337,7 +370,7 @@ defmodule Membrane.Element.GCloud.SpeechToText do
     |> div(1 |> Time.second())
   end
 
-  defp client_start_stream(%{client: client} = state, caps) do
+  defp client_start_stream(client, caps, state) do
     Process.send_after(
       self(),
       :start_new_client,
