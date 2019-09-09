@@ -55,7 +55,7 @@ defmodule Membrane.Element.GCloud.SpeechToText.SamplesQueueTest do
     assert result.limit == 100
   end
 
-  test "drop_by_samples" do
+  test "peek_by_samples" do
     sq =
       SamplesQueue.new(limit: 150)
       |> SamplesQueue.push("a", 50)
@@ -63,30 +63,47 @@ defmodule Membrane.Element.GCloud.SpeechToText.SamplesQueueTest do
       |> SamplesQueue.push("c", 15)
       |> SamplesQueue.push("d", 40)
 
-    assert {0, new_sq} = sq |> SamplesQueue.drop_by_samples(49)
+    assert sq |> SamplesQueue.peek_by_samples(0) == []
+    assert sq |> SamplesQueue.peek_by_samples(39) == []
+    assert sq |> SamplesQueue.peek_by_samples(40) == [{40, "d"}]
+    assert sq |> SamplesQueue.peek_by_samples(54) == [{40, "d"}]
+    assert sq |> SamplesQueue.peek_by_samples(55) == [{15, "c"}, {40, "d"}]
+    assert sq |> SamplesQueue.peek_by_samples(135) == [{50, "a"}, {30, "b"}, {15, "c"}, {40, "d"}]
+    assert sq |> SamplesQueue.peek_by_samples(200) == [{50, "a"}, {30, "b"}, {15, "c"}, {40, "d"}]
+  end
+
+  test "drop_old_samples" do
+    sq =
+      SamplesQueue.new(limit: 150)
+      |> SamplesQueue.push("a", 50)
+      |> SamplesQueue.push("b", 30)
+      |> SamplesQueue.push("c", 15)
+      |> SamplesQueue.push("d", 40)
+
+    assert {0, new_sq} = sq |> SamplesQueue.drop_old_samples(49)
     assert Enum.to_list(new_sq.q) == [{50, "a"}, {30, "b"}, {15, "c"}, {40, "d"}]
     assert new_sq.total == 135
 
-    assert {50, new_sq} = sq |> SamplesQueue.drop_by_samples(50)
+    assert {50, new_sq} = sq |> SamplesQueue.drop_old_samples(50)
     assert Enum.to_list(new_sq.q) == [{30, "b"}, {15, "c"}, {40, "d"}]
     assert new_sq.total == 85
 
-    assert {50, new_sq} = sq |> SamplesQueue.drop_by_samples(51)
+    assert {50, new_sq} = sq |> SamplesQueue.drop_old_samples(51)
     assert Enum.to_list(new_sq.q) == [{30, "b"}, {15, "c"}, {40, "d"}]
     assert new_sq.total == 85
 
-    assert {135, new_sq} = sq |> SamplesQueue.drop_by_samples(135)
+    assert {135, new_sq} = sq |> SamplesQueue.drop_old_samples(135)
     assert Enum.to_list(new_sq.q) == []
     assert new_sq.total == 0
 
-    assert {135, new_sq} = sq |> SamplesQueue.drop_by_samples(140)
+    assert {135, new_sq} = sq |> SamplesQueue.drop_old_samples(140)
     assert Enum.to_list(new_sq.q) == []
     assert new_sq.total == 0
   end
 
-  test "to_list" do
+  test "payloads/1" do
     sq = SamplesQueue.new()
-    assert sq |> SamplesQueue.to_list() == []
+    assert sq |> SamplesQueue.payloads() == []
 
     sq =
       sq
@@ -94,7 +111,7 @@ defmodule Membrane.Element.GCloud.SpeechToText.SamplesQueueTest do
       |> SamplesQueue.push("b", 30)
       |> SamplesQueue.push("c", 15)
 
-    assert sq |> SamplesQueue.to_list() == ["a", "b", "c"]
+    assert sq |> SamplesQueue.payloads() == ["a", "b", "c"]
   end
 
   test "flush" do
@@ -127,12 +144,12 @@ defmodule Membrane.Element.GCloud.SpeechToText.SamplesQueueTest do
       assert result.total == 50
     end
 
-    test "drop_by_samples", %{empty: empty} do
-      assert empty |> SamplesQueue.drop_by_samples(20) == {0, empty}
+    test "drop_old_samples", %{empty: empty} do
+      assert empty |> SamplesQueue.drop_old_samples(20) == {0, empty}
     end
 
-    test "to_list", %{empty: empty} do
-      assert empty |> SamplesQueue.to_list() == []
+    test "payloads", %{empty: empty} do
+      assert empty |> SamplesQueue.payloads() == []
     end
 
     test "flush", %{empty: empty} do
