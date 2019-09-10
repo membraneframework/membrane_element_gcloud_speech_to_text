@@ -350,7 +350,9 @@ defmodule Membrane.Element.GCloud.SpeechToText do
     accuracy = Time.milliseconds(100)
     rounded_start_time = start_time |> Kernel./(accuracy) |> round() |> Kernel.*(accuracy)
 
-    {:ok, client_pid} = Client.start(start_time: rounded_start_time, monitor_target: true)
+    {:ok, client_pid} =
+      Client.start(start_time: rounded_start_time, monitor_target: true, include_sender: true)
+
     monitor = Process.monitor(client_pid)
     info("[#{start_time |> Time.to_milliseconds()}] Started new client: #{inspect(client_pid)}")
 
