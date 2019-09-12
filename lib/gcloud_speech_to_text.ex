@@ -153,7 +153,7 @@ defmodule Membrane.Element.GCloud.SpeechToText do
   def handle_caps(:input, %FLAC{} = caps, _ctx, state) do
     state = %{state | init_time: Time.monotonic_time()}
 
-    :ok = client_start_stream(state.client, caps, state)
+    :ok = state.client |> client_start_stream(caps, state)
 
     {:ok, state}
   end
@@ -172,7 +172,7 @@ defmodule Membrane.Element.GCloud.SpeechToText do
 
     Process.send_after(self(), :demand_frame, demand_time)
 
-    state = update_in(state.client.failure_q, &SamplesQueue.push(&1, payload, buffer_samples))
+    state = update_in(state.client.backup_queue, &SamplesQueue.push(&1, payload, buffer_samples))
 
     :ok =
       Client.send_request(
@@ -256,7 +256,7 @@ defmodule Membrane.Element.GCloud.SpeechToText do
     start_from_sample = (state.samples - overlap_samples) |> max(0)
 
     new_queue =
-      old_client.failure_q
+      old_client.backup_queue
       |> SamplesQueue.peek_by_samples(overlap_samples)
       |> SamplesQueue.from_list()
 
@@ -294,7 +294,7 @@ defmodule Membrane.Element.GCloud.SpeechToText do
     warn("Client #{inspect(pid)} down with reason: #{inspect(reason)}")
     caps = ctx.pads.input.caps
 
-    client = start_client(caps, dead_client.queue_start, dead_client.failure_q)
+    client = start_client(caps, dead_client.queue_start, dead_client.backup_queue)
 
     state = %{state | client: client}
 
@@ -315,10 +315,10 @@ defmodule Membrane.Element.GCloud.SpeechToText do
     caps = ctx.pads.input.caps
 
     limit = 1 |> Time.second() |> time_to_samples(caps)
-    unrecognized_samples = dead_client.failure_q |> SamplesQueue.samples()
+    unrecognized_samples = dead_client.backup_queue |> SamplesQueue.samples()
 
     if unrecognized_samples > limit do
-      client = start_client(caps, dead_client.queue_start, dead_client.failure_q)
+      client = start_client(caps, dead_client.queue_start, dead_client.backup_queue)
 
       state = %{state | old_client: client}
 
@@ -368,7 +368,7 @@ defmodule Membrane.Element.GCloud.SpeechToText do
     %{
       pid: client_pid,
       queue_start: queue_start,
-      failure_q: queue,
+      backup_queue: queue,
       monitor: monitor
     }
   end
@@ -409,7 +409,7 @@ defmodule Membrane.Element.GCloud.SpeechToText do
     request = StreamingRecognizeRequest.new(streaming_request: {:streaming_config, str_cfg})
     :ok = client.pid |> Client.send_request(request)
 
-    client.failure_q
+    client.backup_queue
     |> SamplesQueue.payloads()
     |> Enum.each(
       &Client.send_request(
@@ -432,10 +432,10 @@ defmodule Membrane.Element.GCloud.SpeechToText do
     end
   end
 
-  defp do_update_client_queue(%{failure_q: queue, queue_start: start} = client, caps, end_time) do
+  defp do_update_client_queue(%{backup_queue: queue, queue_start: start} = client, caps, end_time) do
     start_time = start |> samples_to_time(caps)
     samples_to_drop = (end_time - start_time) |> time_to_samples(caps)
-    {dropped_samples, failure_q} = queue |> SamplesQueue.drop_old_samples(samples_to_drop)
-    %{client | failure_q: failure_q, queue_start: start + dropped_samples}
+    {dropped_samples, backup_queue} = queue |> SamplesQueue.drop_old_samples(samples_to_drop)
+    %{client | backup_queue: backup_queue, queue_start: start + dropped_samples}
   end
 end
