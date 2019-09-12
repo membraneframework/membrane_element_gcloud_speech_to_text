@@ -138,8 +138,15 @@ defmodule Membrane.Element.GCloud.SpeechToText do
 
   @impl true
   def handle_prepared_to_stopped(_ctx, state) do
-    :ok = state.client.pid |> Client.stop()
-    {:ok, %{state | client: nil, samples: 0}}
+    if state.client do
+      :ok = state.client.pid |> Client.stop()
+    end
+
+    if state.old_client do
+      :ok = state.old_client.pid |> Client.stop()
+    end
+
+    {:ok, %{state | client: nil, old_client: nil, samples: 0}}
   end
 
   @impl true
