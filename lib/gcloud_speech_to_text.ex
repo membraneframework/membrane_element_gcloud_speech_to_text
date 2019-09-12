@@ -151,7 +151,7 @@ defmodule Membrane.Element.GCloud.SpeechToText do
 
   @impl true
   def handle_caps(:input, %FLAC{} = caps, _ctx, state) do
-    state = %{state | init_time: Time.vm_time()}
+    state = %{state | init_time: Time.monotonic_time()}
 
     :ok = client_start_stream(state.client, caps, state)
 
@@ -166,7 +166,9 @@ defmodule Membrane.Element.GCloud.SpeechToText do
     streamed_audio_time = samples_to_time(state.samples, caps)
 
     demand_time =
-      (state.init_time + streamed_audio_time - Time.vm_time()) |> max(0) |> Time.to_milliseconds()
+      (state.init_time + streamed_audio_time - Time.monotonic_time())
+      |> max(0)
+      |> Time.to_milliseconds()
 
     Process.send_after(self(), :demand_frame, demand_time)
 
