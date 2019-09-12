@@ -139,10 +139,12 @@ defmodule Membrane.Element.GCloud.SpeechToText do
   @impl true
   def handle_prepared_to_stopped(_ctx, state) do
     if state.client do
+      state.client.monitor |> Process.demonitor([:flush])
       :ok = state.client.pid |> Client.stop()
     end
 
     if state.old_client do
+      state.old_client.monitor |> Process.demonitor([:flush])
       :ok = state.old_client.pid |> Client.stop()
     end
 
@@ -187,7 +189,6 @@ defmodule Membrane.Element.GCloud.SpeechToText do
   def handle_event(:input, %EndOfStream{}, ctx, state) do
     info("End of Stream")
     :ok = state.client.pid |> Client.end_stream()
-    state = %{state | client: nil, old_client: state.client}
     super(:input, %EndOfStream{}, ctx, state)
   end
 
@@ -276,7 +277,7 @@ defmodule Membrane.Element.GCloud.SpeechToText do
   @impl true
   def handle_other({:stop_old_client, pid, monitor}, _ctx, state) do
     if Process.alive?(pid) do
-      monitor |> Process.demonitor()
+      monitor |> Process.demonitor([:flush])
       pid |> Client.stop()
       info("Stopped old client: #{inspect(pid)}")
       {:ok, %{state | old_client: nil}}
