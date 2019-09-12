@@ -117,11 +117,9 @@ defmodule Membrane.Element.GCloud.SpeechToText do
       |> Map.update!(:model, &Atom.to_string/1)
       |> Map.merge(%{
         client: nil,
-        client_monitor: nil,
         old_client: nil,
         init_time: nil,
-        samples: 0,
-        overlap_queue: nil
+        samples: 0
       })
 
     {:ok, state}
@@ -129,8 +127,8 @@ defmodule Membrane.Element.GCloud.SpeechToText do
 
   @impl true
   def handle_stopped_to_prepared(_ctx, state) do
-    state = start_client(state, nil)
-    {:ok, state}
+    client = start_client()
+    {:ok, %{state | client: client}}
   end
 
   @impl true
@@ -140,15 +138,20 @@ defmodule Membrane.Element.GCloud.SpeechToText do
 
   @impl true
   def handle_prepared_to_stopped(_ctx, state) do
-    :ok = state.client |> Client.stop()
-    {:ok, %{state | client: nil, samples: 0}}
+    if state.client do
+      :ok = state.client.pid |> Client.stop()
+    end
+
+    if state.old_client do
+      :ok = state.old_client.pid |> Client.stop()
+    end
+
+    {:ok, %{state | client: nil, old_client: nil, samples: 0}}
   end
 
   @impl true
   def handle_caps(:input, %FLAC{} = caps, _ctx, state) do
-    samples_limit = state.reconnection_overlap_time |> time_to_samples(caps)
-    queue = SamplesQueue.new(limit: samples_limit)
-    state = %{state | init_time: Time.os_time(), overlap_queue: queue}
+    state = %{state | init_time: Time.monotonic_time()}
 
     :ok = state.client |> client_start_stream(caps, state)
 
@@ -163,26 +166,29 @@ defmodule Membrane.Element.GCloud.SpeechToText do
     streamed_audio_time = samples_to_time(state.samples, caps)
 
     demand_time =
-      (state.init_time + streamed_audio_time - Time.os_time()) |> max(0) |> Time.to_milliseconds()
+      (state.init_time + streamed_audio_time - Time.monotonic_time())
+      |> max(0)
+      |> Time.to_milliseconds()
 
     Process.send_after(self(), :demand_frame, demand_time)
 
-    q = state.overlap_queue |> SamplesQueue.push(payload, buffer_samples)
+    state = update_in(state.client.backup_queue, &SamplesQueue.push(&1, payload, buffer_samples))
 
     :ok =
       Client.send_request(
-        state.client,
+        state.client.pid,
         StreamingRecognizeRequest.new(streaming_request: {:audio_content, payload})
       )
 
-    {:ok, %{state | overlap_queue: q}}
+    {:ok, state}
   end
 
   @impl true
   def handle_event(:input, %EndOfStream{}, ctx, state) do
     info("End of Stream")
-    :ok = state.client |> Client.end_stream()
-    super(:input, %EndOfStream{}, ctx, %{state | old_client: nil})
+    :ok = state.client.pid |> Client.end_stream()
+    state = %{state | client: nil, old_client: state.client}
+    super(:input, %EndOfStream{}, ctx, state)
   end
 
   @impl true
@@ -196,23 +202,34 @@ defmodule Membrane.Element.GCloud.SpeechToText do
   end
 
   @impl true
-  def handle_other(%StreamingRecognizeResponse{} = response, ctx, state) do
-    unless response.results |> Enum.empty?() do
-      received_end_time =
-        response.results
-        |> Enum.map(&(&1.result_end_time |> Time.nanosecond()))
-        |> Enum.max()
+  def handle_other({from, %StreamingRecognizeResponse{} = response}, ctx, state) do
+    caps = ctx.pads.input.caps
+    streamed_audio_time = samples_to_time(state.samples, caps)
+    log_prefix = "[#{inspect(from)}] [#{streamed_audio_time |> Time.to_milliseconds()}]"
 
-      caps = ctx.pads.input.caps
-      streamed_audio_time = samples_to_time(state.samples, caps)
-      delay = streamed_audio_time - received_end_time
+    state =
+      if response.results |> Enum.empty?() do
+        state
+      else
+        received_end_time =
+          response.results
+          |> Enum.map(&(&1.result_end_time |> Time.nanosecond()))
+          |> Enum.max()
 
-      info(
-        "[#{inspect(state.client)}] Recognize response delay: #{delay |> Time.to_seconds()} seconds"
-      )
+        delay = streamed_audio_time - received_end_time
+
+        info("#{log_prefix} Recognize response delay: #{delay |> Time.to_milliseconds()} ms")
+
+        update_client_queue(state, from, caps, received_end_time)
+      end
+
+    if response.error != nil do
+      warn("#{log_prefix}: #{inspect(response.error)}")
+
+      {:ok, state}
+    else
+      {{:ok, notify: response}, state}
     end
-
-    {{:ok, notify: response}, state}
   end
 
   @impl true
@@ -221,60 +238,139 @@ defmodule Membrane.Element.GCloud.SpeechToText do
   end
 
   @impl true
-  def handle_other(:start_new_client, ctx, %{client: old_client} = state) do
-    :ok = old_client |> Client.end_stream()
-    state.client_monitor |> Process.demonitor()
-    start_from_sample = state.samples - SamplesQueue.samples(state.overlap_queue)
-    state = start_client(state, ctx.pads.input.caps, start_from_sample)
-    :ok = state.client |> client_start_stream(ctx.pads.input.caps, state)
-
+  def handle_other(:start_new_client, %{pads: %{input: %{caps: nil}}}, state) do
     Process.send_after(
       self(),
-      {:stop_old_client, old_client},
-      state.results_await_time |> Time.to_milliseconds()
+      :start_new_client,
+      state.streaming_time_limit |> Time.to_milliseconds()
     )
 
     {:ok, state}
   end
 
   @impl true
-  def handle_other({:stop_old_client, old_client}, _ctx, state) do
-    old_client |> Client.stop()
-    info("Stopping old client: #{inspect(old_client)}")
+  def handle_other(:start_new_client, ctx, %{client: old_client} = state) do
+    :ok = old_client.pid |> Client.end_stream()
+    caps = ctx.pads.input.caps
+    overlap_samples = state.reconnection_overlap_time |> time_to_samples(caps)
+    start_from_sample = (state.samples - overlap_samples) |> max(0)
+
+    new_queue =
+      old_client.backup_queue
+      |> SamplesQueue.peek_by_samples(overlap_samples)
+      |> SamplesQueue.from_list()
+
+    client = start_client(caps, start_from_sample, new_queue)
+    state = %{state | client: client}
+    :ok = client_start_stream(client, caps, state)
+
+    Process.send_after(
+      self(),
+      {:stop_old_client, old_client.pid, old_client.monitor},
+      state.results_await_time |> Time.to_milliseconds()
+    )
+
+    {:ok, %{state | old_client: old_client}}
+  end
+
+  @impl true
+  def handle_other({:stop_old_client, pid, monitor}, _ctx, state) do
+    if Process.alive?(pid) do
+      monitor |> Process.demonitor()
+      pid |> Client.stop()
+      info("Stopped old client: #{inspect(pid)}")
+      {:ok, %{state | old_client: nil}}
+    else
+      {:ok, state}
+    end
+  end
+
+  @impl true
+  def handle_other(
+        {:DOWN, _ref, :process, pid, reason},
+        ctx,
+        %{client: %{pid: pid} = dead_client} = state
+      ) do
+    warn("Client #{inspect(pid)} down with reason: #{inspect(reason)}")
+    caps = ctx.pads.input.caps
+
+    client = start_client(caps, dead_client.queue_start, dead_client.backup_queue)
+
+    state = %{state | client: client}
+
+    unless caps == nil do
+      :ok = client_start_stream(client, caps, state)
+    end
+
     {:ok, state}
   end
 
   @impl true
-  def handle_other({:DOWN, _ref, :prcess, pid, _reason}, ctx, %{client: pid} = state) do
+  def handle_other(
+        {:DOWN, _ref, :process, pid, reason},
+        ctx,
+        %{old_client: %{pid: pid} = dead_client} = state
+      ) do
+    info("Old client #{inspect(pid)} down with reason #{inspect(reason)}")
     caps = ctx.pads.input.caps
-    state = start_client(state, caps)
-    :ok = state.client |> client_start_stream(caps, state)
-    # TODO: audio re-upload
-    {:ok, state}
+
+    limit = 1 |> Time.second() |> time_to_samples(caps)
+    unrecognized_samples = dead_client.backup_queue |> SamplesQueue.samples()
+
+    if unrecognized_samples > limit do
+      client = start_client(caps, dead_client.queue_start, dead_client.backup_queue)
+
+      state = %{state | old_client: client}
+
+      :ok = client_start_stream(client, caps, state)
+      :ok = client.pid |> Client.end_stream()
+
+      Process.send_after(
+        self(),
+        {:stop_old_client, client.pid, client.monitor},
+        state.results_await_time |> Time.to_milliseconds()
+      )
+
+      {:ok, state}
+    else
+      # We're close enough to the end, don't restart the client
+      {:ok, %{state | old_client: nil}}
+    end
   end
 
-  defp start_client(state, caps) do
-    start_client(state, caps, state.samples)
+  defp start_client() do
+    do_start_client(0)
   end
 
-  defp start_client(state, caps, start_from_sample) do
+  defp start_client(caps, start_sample, queue) do
     start_time =
-      if caps == nil do
-        0
-      else
-        samples_to_time(start_from_sample, caps)
+      case caps do
+        nil -> 0
+        %FLAC{} -> samples_to_time(start_sample, caps)
       end
 
-    accuracy = Time.milliseconds(100)
+    do_start_client(start_time, queue, start_sample)
+  end
 
+  defp do_start_client(start_time, queue \\ SamplesQueue.new(), queue_start \\ 0) do
     # It seems Google Speech is using low accuracy when providing time offsets
     # for the recognized words. In order to keep them aligned between client
     # sessions, we need to round the offset
-    start_time = start_time |> Kernel./(accuracy) |> round |> Kernel.*(accuracy)
-    {:ok, client} = Client.start(start_time: start_time, monitor_target: true)
-    monitor = Process.monitor(client)
-    info("Started new client: #{inspect(client)}")
-    %{state | client: client, client_monitor: monitor}
+    accuracy = Time.milliseconds(100)
+    rounded_start_time = start_time |> Kernel./(accuracy) |> round() |> Kernel.*(accuracy)
+
+    {:ok, client_pid} =
+      Client.start(start_time: rounded_start_time, monitor_target: true, include_sender: true)
+
+    monitor = Process.monitor(client_pid)
+    info("[#{start_time |> Time.to_milliseconds()}] Started new client: #{inspect(client_pid)}")
+
+    %{
+      pid: client_pid,
+      queue_start: queue_start,
+      backup_queue: queue,
+      monitor: monitor
+    }
   end
 
   defp samples_to_time(samples, %FLAC{} = caps) do
@@ -311,15 +407,35 @@ defmodule Membrane.Element.GCloud.SpeechToText do
       )
 
     request = StreamingRecognizeRequest.new(streaming_request: {:streaming_config, str_cfg})
-    :ok = client |> Client.send_request(request)
+    :ok = client.pid |> Client.send_request(request)
 
-    state.overlap_queue
-    |> SamplesQueue.to_list()
+    client.backup_queue
+    |> SamplesQueue.payloads()
     |> Enum.each(
       &Client.send_request(
-        state.client,
+        client.pid,
         StreamingRecognizeRequest.new(streaming_request: {:audio_content, &1})
       )
     )
+  end
+
+  defp update_client_queue(state, from, caps, received_end_time) do
+    cond do
+      state.client != nil and state.client.pid == from ->
+        %{state | client: do_update_client_queue(state.client, caps, received_end_time)}
+
+      state.old_client != nil and state.old_client.pid == from ->
+        %{state | old_client: do_update_client_queue(state.old_client, caps, received_end_time)}
+
+      true ->
+        raise "This should not happen, #{inspect(__MODULE__)} is bugged!"
+    end
+  end
+
+  defp do_update_client_queue(%{backup_queue: queue, queue_start: start} = client, caps, end_time) do
+    start_time = start |> samples_to_time(caps)
+    samples_to_drop = (end_time - start_time) |> time_to_samples(caps)
+    {dropped_samples, backup_queue} = queue |> SamplesQueue.drop_old_samples(samples_to_drop)
+    %{client | backup_queue: backup_queue, queue_start: start + dropped_samples}
   end
 end

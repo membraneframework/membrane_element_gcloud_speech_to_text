@@ -68,7 +68,7 @@ defmodule Membrane.Element.GCloud.SpeechToText.IntegrationTest do
     assert response.error == nil
     assert [%StreamingRecognitionResult{} = res] = response.results
     assert res.is_final == true
-    delta = 100 |> Time.milliseconds() |> Time.to_nanoseconds()
+    delta = 150 |> Time.milliseconds() |> Time.to_nanoseconds()
     assert_in_delta res.result_end_time, streaming_time_limit |> Time.to_nanoseconds(), delta
     assert [%SpeechRecognitionAlternative{} = alt] = res.alternatives
 

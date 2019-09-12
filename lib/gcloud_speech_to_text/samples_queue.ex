@@ -23,6 +23,19 @@ defmodule Membrane.Element.GCloud.SpeechToText.SamplesQueue do
     struct!(__MODULE__, args)
   end
 
+  @spec from_list([{samples_num(), Payload.t()}], Keyword.t()) :: t()
+  def from_list(content, opts \\ []) do
+    args = opts |> Keyword.take([:limit])
+
+    total =
+      content
+      |> Enum.reduce(0, fn {samples, _payload}, acc ->
+        acc + samples
+      end)
+
+    struct!(__MODULE__, args ++ [q: Qex.new(content), total: total])
+  end
+
   @doc """
   Returns total number of samples in payloads stored in a queue.
   """
@@ -60,41 +73,68 @@ defmodule Membrane.Element.GCloud.SpeechToText.SamplesQueue do
   end
 
   @doc """
-  Pops payloads from the queue with a total number of samples greater than the provided number.
+  Drops payloads from the queue with a total number of samples lesser or equal to the provided number.
 
-  Returns `{{:empty, [payloads]}, timed_queue` if there wasn't enough data stored in queue to provide the requested number of samples, `{{:values, [payloads]}, timed_queue}` otherwise.
+  In other words, marks the provided number of samples as disposable and drops the payloads
+  that contain only disposable samples.
+
+  Returns a tuple with the number of dropped samples and updated queue.
   """
-  @spec pop_by_samples(t(), samples_num()) :: {{:empty | :values, [Payload.t()]}, t()}
-  def pop_by_samples(%__MODULE__{} = timed_queue, samples) do
-    do_pop_by_samples(timed_queue, samples)
+  @spec drop_old_samples(t(), samples_num()) :: {samples_num(), t()}
+  def drop_old_samples(%__MODULE__{} = timed_queue, samples) do
+    do_drop_old_samples(timed_queue, samples)
   end
 
-  defp do_pop_by_samples(timed_queue, samples, acc \\ [])
-
-  defp do_pop_by_samples(%__MODULE__{} = timed_queue, samples, acc) when samples <= 0 do
-    {{:values, acc |> Enum.reverse()}, timed_queue}
-  end
-
-  defp do_pop_by_samples(%__MODULE__{q: q} = timed_queue, samples_to_pop, acc) do
-    {popped, q} = q |> Qex.pop()
-    timed_queue = timed_queue |> Map.put(:q, q)
+  defp do_drop_old_samples(%__MODULE__{q: q} = timed_queue, samples_to_drop, acc \\ 0) do
+    {popped, new_q} = q |> Qex.pop()
 
     case popped do
       :empty ->
-        {{:empty, acc |> Enum.reverse()}, timed_queue}
+        {acc, timed_queue}
 
-      {:value, {samples, payload}} ->
+      {:value, {samples, _payload}} when samples_to_drop < samples ->
+        {acc, timed_queue}
+
+      {:value, {samples, _payload}} ->
         timed_queue
         |> Map.update!(:total, &(&1 - samples))
-        |> do_pop_by_samples(samples_to_pop - samples, [payload | acc])
+        |> Map.put(:q, new_q)
+        |> do_drop_old_samples(samples_to_drop - samples, acc + samples)
+    end
+  end
+
+  @doc """
+  Returns the most recent payloads stored in queue containing at least provided number of samples.
+  """
+  @spec peek_by_samples(t(), samples_num()) :: [Payload.t()]
+  def peek_by_samples(%__MODULE__{q: q}, samples) do
+    do_peek(q, samples, [])
+  end
+
+  defp do_peek(_q, samples, acc) when samples <= 0 do
+    acc
+  end
+
+  defp do_peek(q, samples, acc) do
+    {popped, new_q} = q |> Qex.pop_back()
+
+    case popped do
+      :empty ->
+        acc
+
+      {:value, {popped_samples, _payload}} when popped_samples > samples ->
+        acc
+
+      {:value, {popped_samples, _payload} = entry} ->
+        do_peek(new_q, samples - popped_samples, [entry | acc])
     end
   end
 
   @doc """
   Returns a list of payloads stored in a queue
   """
-  @spec to_list(t()) :: [Payload.t()]
-  def to_list(%__MODULE__{q: q}) do
+  @spec payloads(t()) :: [Payload.t()]
+  def payloads(%__MODULE__{q: q}) do
     q |> Enum.to_list() |> Enum.map(&elem(&1, 1))
   end
 
@@ -103,7 +143,7 @@ defmodule Membrane.Element.GCloud.SpeechToText.SamplesQueue do
   """
   @spec flush(t()) :: {[Payload.t()], t()}
   def flush(%__MODULE__{} = tq) do
-    payloads = tq |> to_list()
+    payloads = tq |> payloads()
     {payloads, %{tq | q: Qex.new(), total: 0}}
   end
 end
