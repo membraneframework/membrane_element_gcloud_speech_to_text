@@ -1,7 +1,7 @@
 defmodule Membrane.Element.GCloud.SpeechToText.MixProject do
   use Mix.Project
 
-  @version "0.3.1"
+  @version "0.3.2"
   @github_url "https://github.com/membraneframework/membrane-element-gcloud-speech-to-text"
 
   def project do
@@ -36,7 +36,7 @@ defmodule Membrane.Element.GCloud.SpeechToText.MixProject do
 
   defp deps do
     [
-      {:membrane_core, "~> 0.3.2"},
+      {:membrane_core, "~> 0.4.0"},
       {:membrane_caps_audio_flac, "~> 0.1.1"},
       {:gcloud_speech_grpc, "~> 0.3.0"},
       {:qex, "~> 0.5"},

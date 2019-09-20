@@ -14,12 +14,11 @@ defmodule Membrane.Element.GCloud.SpeechToText do
   (currently 5 minutes)
   """
 
-  use Membrane.Element.Base.Sink
+  use Membrane.Sink
   use Membrane.Log, tags: :membrane_element_gcloud_stt
 
   alias Membrane.Buffer
   alias Membrane.Caps.Audio.FLAC
-  alias Membrane.Event.EndOfStream
   alias Membrane.Time
   alias GCloud.SpeechAPI.Streaming.Client
 
@@ -186,15 +185,10 @@ defmodule Membrane.Element.GCloud.SpeechToText do
   end
 
   @impl true
-  def handle_event(:input, %EndOfStream{}, ctx, state) do
+  def handle_end_of_stream(:input, ctx, state) do
     info("End of Stream")
     :ok = state.client.pid |> Client.end_stream()
-    super(:input, %EndOfStream{}, ctx, state)
-  end
-
-  @impl true
-  def handle_event(pad, event, ctx, state) do
-    super(pad, event, ctx, state)
+    super(:input, ctx, state)
   end
 
   @impl true
