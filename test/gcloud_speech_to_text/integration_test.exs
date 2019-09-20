@@ -8,20 +8,42 @@ defmodule Membrane.Element.GCloud.SpeechToText.IntegrationTest do
     WordInfo
   }
 
+  alias Membrane.Element.{File, FLACParser, GCloud}
   alias Membrane.Time
+  alias Membrane.Testing
+
+  import Membrane.Testing.Assertions
 
   @moduletag :external
 
   @fixture_path "../fixtures/sample.flac" |> Path.expand(__DIR__)
   @fixture_duration 7_270 |> Time.milliseconds() |> Time.to_nanoseconds()
 
+  defp testing_pipeline(recognition_opts) do
+    Testing.Pipeline.start_link(%Testing.Pipeline.Options{
+      elements: [
+        src: %File.Source{location: @fixture_path},
+        parser: FLACParser,
+        sink:
+          struct!(
+            GCloud.SpeechToText,
+            [
+              language_code: "en-GB",
+              word_time_offsets: true,
+              interim_results: false
+            ] ++ recognition_opts
+          )
+      ]
+    })
+  end
+
   test "recognition pipeline provides transcription of short file" do
-    assert {:ok, pid} = RecognitionPipeline.start_link([@fixture_path, self(), []])
-    assert :ok = RecognitionPipeline.play(pid)
+    assert {:ok, pid} = testing_pipeline([])
+    assert :ok = Testing.Pipeline.play(pid)
 
-    assert_receive :end_of_upload, 10_000
+    assert_end_of_stream(pid, :sink, :input, 10_000)
 
-    assert_receive %StreamingRecognizeResponse{} = response, 10_000
+    assert_pipeline_notified(pid, :sink, %StreamingRecognizeResponse{} = response, 10_000)
     assert response.error == nil
     assert [%StreamingRecognitionResult{} = res] = response.results
 
@@ -53,18 +75,17 @@ defmodule Membrane.Element.GCloud.SpeechToText.IntegrationTest do
   test "recognition pipeline uses overlap when reconnecting" do
     streaming_time_limit = 6 |> Time.seconds()
 
-    element_opts = [
-      streaming_time_limit: streaming_time_limit,
-      reconnection_overlap_time: 2 |> Time.seconds()
-    ]
+    assert {:ok, pid} =
+             testing_pipeline(
+               streaming_time_limit: streaming_time_limit,
+               reconnection_overlap_time: 2 |> Time.seconds()
+             )
 
-    assert {:ok, pid} = RecognitionPipeline.start_link([@fixture_path, self(), element_opts])
+    assert :ok = Testing.Pipeline.play(pid)
 
-    assert :ok = RecognitionPipeline.play(pid)
+    assert_end_of_stream(pid, :sink, :input, 10_000)
 
-    assert_receive :end_of_upload, 10_000
-
-    assert_receive %StreamingRecognizeResponse{} = response, 10_000
+    assert_pipeline_notified(pid, :sink, %StreamingRecognizeResponse{} = response, 10_000)
     assert response.error == nil
     assert [%StreamingRecognitionResult{} = res] = response.results
     assert res.is_final == true
@@ -86,7 +107,7 @@ defmodule Membrane.Element.GCloud.SpeechToText.IntegrationTest do
     assert_in_delta start_time, 4_900_000_000, delta
     assert_in_delta end_time, 5_200_000_000, delta
 
-    assert_receive %StreamingRecognizeResponse{} = response, 10_000
+    assert_pipeline_notified(pid, :sink, %StreamingRecognizeResponse{} = response, 10_000)
     assert response.error == nil
     assert [%StreamingRecognitionResult{} = res] = response.results
     assert res.is_final == true
