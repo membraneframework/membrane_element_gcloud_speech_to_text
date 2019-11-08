@@ -30,7 +30,7 @@ defmodule RecognitionPipeline do
       links: links
     }
 
-    {{:ok, spec}, %{target: target}}
+    {{:ok, spec: spec}, %{target: target}}
   end
 
   @impl true

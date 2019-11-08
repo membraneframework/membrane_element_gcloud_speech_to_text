@@ -36,12 +36,12 @@ defmodule Membrane.Element.GCloud.SpeechToText.MixProject do
 
   defp deps do
     [
-      {:membrane_core, "~> 0.4.0"},
+      {:membrane_core, "~> 0.4.1"},
       {:membrane_caps_audio_flac, "~> 0.1.1"},
       {:gcloud_speech_grpc, "~> 0.3.0"},
       {:qex, "~> 0.5"},
       {:ex_doc, "~> 0.21", only: :dev, runtime: false},
-      {:dialyxir, "~> 1.0.0-rc.6", only: :dev, runtime: false},
+      {:dialyxir, "~> 1.0.0-rc.7", only: :dev, runtime: false},
       {:membrane_element_file, "~> 0.2", only: [:dev, :test]},
       {:membrane_element_flac_parser, "~> 0.1", only: [:dev, :test]}
     ]
