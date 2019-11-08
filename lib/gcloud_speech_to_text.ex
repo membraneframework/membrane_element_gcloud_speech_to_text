@@ -154,6 +154,12 @@ defmodule Membrane.Element.GCloud.SpeechToText do
   def handle_caps(:input, %FLAC{} = caps, _ctx, state) do
     state = %{state | init_time: Time.monotonic_time()}
 
+    Process.send_after(
+      self(),
+      :start_new_client,
+      state.streaming_time_limit |> Time.to_milliseconds()
+    )
+
     :ok = state.client |> client_start_stream(caps, state)
 
     {:ok, state}
@@ -234,6 +240,7 @@ defmodule Membrane.Element.GCloud.SpeechToText do
 
   @impl true
   def handle_other(:start_new_client, %{pads: %{input: %{caps: nil}}}, state) do
+    # Streaming haven't started, just reschedule client swap
     Process.send_after(
       self(),
       :start_new_client,
@@ -257,13 +264,20 @@ defmodule Membrane.Element.GCloud.SpeechToText do
 
     client = start_client(caps, start_from_sample, new_queue)
     state = %{state | client: client}
-    :ok = client_start_stream(client, caps, state)
+
+    Process.send_after(
+      self(),
+      :start_new_client,
+      state.streaming_time_limit |> Time.to_milliseconds()
+    )
 
     Process.send_after(
       self(),
       {:stop_old_client, old_client.pid, old_client.monitor},
       state.results_await_time |> Time.to_milliseconds()
     )
+
+    :ok = client_start_stream(client, caps, state)
 
     {:ok, %{state | old_client: old_client}}
   end
@@ -274,7 +288,15 @@ defmodule Membrane.Element.GCloud.SpeechToText do
       monitor |> Process.demonitor([:flush])
       pid |> Client.stop()
       info("Stopped old client: #{inspect(pid)}")
-      {:ok, %{state | old_client: nil}}
+
+      state =
+        if state.old_client != nil and state.old_client.pid == pid do
+          %{state | old_client: nil}
+        else
+          state
+        end
+
+      {:ok, state}
     else
       {:ok, state}
     end
@@ -378,12 +400,6 @@ defmodule Membrane.Element.GCloud.SpeechToText do
   end
 
   defp client_start_stream(client, caps, state) do
-    Process.send_after(
-      self(),
-      :start_new_client,
-      state.streaming_time_limit |> Time.to_milliseconds()
-    )
-
     cfg =
       RecognitionConfig.new(
         encoding: :FLAC,
