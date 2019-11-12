@@ -199,7 +199,7 @@ defmodule Membrane.Element.GCloud.SpeechToText do
 
   @impl true
   def handle_other(:demand_frame, _ctx, state) do
-    {{:ok, demand: :input}, state}
+    {{:ok, demand: {:input, &(&1 + 1)}}, state}
   end
 
   @impl true
