@@ -1,7 +1,7 @@
 defmodule Membrane.Element.GCloud.SpeechToText.MixProject do
   use Mix.Project
 
-  @version "0.3.2"
+  @version "0.3.3"
   @github_url "https://github.com/membraneframework/membrane-element-gcloud-speech-to-text"
 
   def project do
