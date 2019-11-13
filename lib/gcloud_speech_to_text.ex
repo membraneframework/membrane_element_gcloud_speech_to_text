@@ -287,7 +287,11 @@ defmodule Membrane.Element.GCloud.SpeechToText do
     if Process.alive?(pid) do
       monitor |> Process.demonitor([:flush])
       pid |> Client.stop()
-      info("Stopped old client: #{inspect(pid)}")
+
+      info(
+        "Stopped client: #{inspect(pid)}, " <>
+          "current old_client: #{inspect(state.old_client && state.old_client.pid)}"
+      )
 
       state =
         if state.old_client != nil and state.old_client.pid == pid do
@@ -335,6 +339,7 @@ defmodule Membrane.Element.GCloud.SpeechToText do
     unrecognized_samples = dead_client.backup_queue |> SamplesQueue.samples()
 
     if unrecognized_samples > limit do
+      info("Restarting old client #{inspect(pid)} from #{inspect(dead_client.queue_start)}}")
       client = start_client(caps, dead_client.queue_start, dead_client.backup_queue)
 
       state = %{state | old_client: client}
@@ -351,6 +356,10 @@ defmodule Membrane.Element.GCloud.SpeechToText do
       {:ok, state}
     else
       # We're close enough to the end, don't restart the client
+      info(
+        "Not restarting old client #{inspect(pid)}, it (most likely) received all transcriptions"
+      )
+
       {:ok, %{state | old_client: nil}}
     end
   end
@@ -380,7 +389,11 @@ defmodule Membrane.Element.GCloud.SpeechToText do
       Client.start(start_time: rounded_start_time, monitor_target: true, include_sender: true)
 
     monitor = Process.monitor(client_pid)
-    info("[#{start_time |> Time.to_milliseconds()}] Started new client: #{inspect(client_pid)}")
+
+    info(
+      "Started new client: #{inspect(client_pid)}, " <>
+        "start_time: #{start_time |> Time.to_milliseconds()}"
+    )
 
     %{
       pid: client_pid,
