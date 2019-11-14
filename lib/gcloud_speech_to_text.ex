@@ -109,6 +109,8 @@ defmodule Membrane.Element.GCloud.SpeechToText do
                 """
               ]
 
+  @demand_frames 5
+
   @impl true
   def handle_init(opts) do
     state =
@@ -132,7 +134,19 @@ defmodule Membrane.Element.GCloud.SpeechToText do
 
   @impl true
   def handle_prepared_to_playing(_ctx, state) do
-    {{:ok, demand: :input}, state}
+    {{:ok, demand: {:input, @demand_frames}}, state}
+  end
+
+  @impl true
+  def handle_playing_to_prepared(ctx, state) do
+    actions =
+      if ctx.pads.input.end_of_stream? do
+        []
+      else
+        [stop_timer: :demand_timer]
+      end
+
+    {{:ok, actions}, state}
   end
 
   @impl true
@@ -162,44 +176,65 @@ defmodule Membrane.Element.GCloud.SpeechToText do
 
     :ok = state.client |> client_start_stream(caps, state)
 
-    {:ok, state}
+    # Usually max and min are the same (fixed-blocksize)
+    avg_samples_num = round((caps.min_block_size + caps.max_block_size) / 2)
+    demand_interval = samples_to_time(avg_samples_num, caps) * @demand_frames
+
+    {{:ok, start_timer: {:demand_timer, demand_interval}}, state}
   end
 
   @impl true
-  def handle_write(:input, %Buffer{payload: payload, metadata: metadata}, ctx, state) do
-    caps = ctx.pads.input.caps
-    buffer_samples = metadata |> Map.get(:samples, 0)
-    state = %{state | samples: state.samples + buffer_samples}
-    streamed_audio_time = samples_to_time(state.samples, caps)
+  def handle_write_list(:input, buffer_list, _ctx, state) do
+    {payloads, buffers_samples} =
+      buffer_list
+      |> Enum.map_reduce(0, fn %Buffer{payload: payload, metadata: metadata}, acc ->
+        samples = metadata |> Map.get(:samples, 0)
+        {payload, acc + samples}
+      end)
 
-    demand_time =
-      (state.init_time + streamed_audio_time - Time.monotonic_time())
-      |> max(0)
-      |> Time.to_milliseconds()
+    audio_content = Enum.join(payloads)
 
-    Process.send_after(self(), :demand_frame, demand_time)
+    state = %{state | samples: state.samples + buffers_samples}
 
-    state = update_in(state.client.backup_queue, &SamplesQueue.push(&1, payload, buffer_samples))
+    state =
+      update_in(state.client.backup_queue, &SamplesQueue.push(&1, audio_content, buffers_samples))
 
     :ok =
       Client.send_request(
         state.client.pid,
-        StreamingRecognizeRequest.new(streaming_request: {:audio_content, payload})
+        StreamingRecognizeRequest.new(streaming_request: {:audio_content, audio_content})
       )
 
     {:ok, state}
   end
 
   @impl true
-  def handle_end_of_stream(:input, ctx, state) do
+  def handle_end_of_stream(:input, _ctx, state) do
     info("End of Stream")
     :ok = state.client.pid |> Client.end_stream()
-    super(:input, ctx, state)
+    {{:ok, stop_timer: :demand_timer}, state}
   end
 
   @impl true
-  def handle_other(:demand_frame, _ctx, state) do
-    {{:ok, demand: {:input, &(&1 + 1)}}, state}
+  def handle_tick(:demand_timer, %{playback_state: :playing} = ctx, state) do
+    caps = ctx.pads.input.caps
+    streamed_audio_time = samples_to_time(state.samples, caps)
+    time_to_demand = (Time.monotonic_time() - (state.init_time + streamed_audio_time)) |> max(0)
+    samples_to_demand = time_to_samples(time_to_demand, caps)
+
+    frames_to_demand =
+      if caps.min_block_size != nil and caps.min_block_size > 0 do
+        avg_samples_num = round((caps.min_block_size + caps.max_block_size) / 2)
+        ceil(samples_to_demand / avg_samples_num)
+      else
+        @demand_frames
+      end
+
+    {{:ok, demand: {:input, frames_to_demand}}, state}
+  end
+
+  def handle_tick(:demand_timer, _ctx, state) do
+    {:ok, state}
   end
 
   @impl true
@@ -287,7 +322,11 @@ defmodule Membrane.Element.GCloud.SpeechToText do
     if Process.alive?(pid) do
       monitor |> Process.demonitor([:flush])
       pid |> Client.stop()
-      info("Stopped old client: #{inspect(pid)}")
+
+      info(
+        "Stopped client: #{inspect(pid)}, " <>
+          "current old_client: #{inspect(state.old_client && state.old_client.pid)}"
+      )
 
       state =
         if state.old_client != nil and state.old_client.pid == pid do
@@ -335,6 +374,7 @@ defmodule Membrane.Element.GCloud.SpeechToText do
     unrecognized_samples = dead_client.backup_queue |> SamplesQueue.samples()
 
     if unrecognized_samples > limit do
+      info("Restarting old client #{inspect(pid)} from #{inspect(dead_client.queue_start)}}")
       client = start_client(caps, dead_client.queue_start, dead_client.backup_queue)
 
       state = %{state | old_client: client}
@@ -351,6 +391,10 @@ defmodule Membrane.Element.GCloud.SpeechToText do
       {:ok, state}
     else
       # We're close enough to the end, don't restart the client
+      info(
+        "Not restarting old client #{inspect(pid)}, it (most likely) received all transcriptions"
+      )
+
       {:ok, %{state | old_client: nil}}
     end
   end
@@ -380,7 +424,11 @@ defmodule Membrane.Element.GCloud.SpeechToText do
       Client.start(start_time: rounded_start_time, monitor_target: true, include_sender: true)
 
     monitor = Process.monitor(client_pid)
-    info("[#{start_time |> Time.to_milliseconds()}] Started new client: #{inspect(client_pid)}")
+
+    info(
+      "Started new client: #{inspect(client_pid)}, " <>
+        "start_time: #{start_time |> Time.to_milliseconds()}"
+    )
 
     %{
       pid: client_pid,
@@ -417,17 +465,21 @@ defmodule Membrane.Element.GCloud.SpeechToText do
         interim_results: state.interim_results
       )
 
-    request = StreamingRecognizeRequest.new(streaming_request: {:streaming_config, str_cfg})
-    :ok = client.pid |> Client.send_request(request)
+    cfg_request = StreamingRecognizeRequest.new(streaming_request: {:streaming_config, str_cfg})
 
-    client.backup_queue
-    |> SamplesQueue.payloads()
-    |> Enum.each(
-      &Client.send_request(
-        client.pid,
-        StreamingRecognizeRequest.new(streaming_request: {:audio_content, &1})
-      )
-    )
+    payload =
+      client.backup_queue
+      |> SamplesQueue.payloads()
+      |> Enum.join()
+
+    requests =
+      if byte_size(payload) > 0 do
+        [cfg_request, StreamingRecognizeRequest.new(streaming_request: {:audio_content, payload})]
+      else
+        [cfg_request]
+      end
+
+    Client.send_requests(client.pid, requests)
   end
 
   defp update_client_queue(state, from, caps, received_end_time) do
