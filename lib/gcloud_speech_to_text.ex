@@ -465,18 +465,21 @@ defmodule Membrane.Element.GCloud.SpeechToText do
         interim_results: state.interim_results
       )
 
-    request = StreamingRecognizeRequest.new(streaming_request: {:streaming_config, str_cfg})
-    :ok = client.pid |> Client.send_request(request)
+    cfg_request = StreamingRecognizeRequest.new(streaming_request: {:streaming_config, str_cfg})
 
     payload =
       client.backup_queue
       |> SamplesQueue.payloads()
       |> Enum.join()
 
-    Client.send_request(
-      client.pid,
-      StreamingRecognizeRequest.new(streaming_request: {:audio_content, payload})
-    )
+    requests =
+      if byte_size(payload) > 0 do
+        [cfg_request, StreamingRecognizeRequest.new(streaming_request: {:audio_content, payload})]
+      else
+        [cfg_request]
+      end
+
+    Client.send_requests(client.pid, requests)
   end
 
   defp update_client_queue(state, from, caps, received_end_time) do
