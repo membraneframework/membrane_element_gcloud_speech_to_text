@@ -110,6 +110,7 @@ defmodule Membrane.Element.GCloud.SpeechToText do
               ]
 
   @demand_frames 5
+  @timer_name :demand_timer
 
   @impl true
   def handle_init(opts) do
@@ -120,7 +121,8 @@ defmodule Membrane.Element.GCloud.SpeechToText do
         client: nil,
         old_client: nil,
         init_time: nil,
-        samples: 0
+        samples: 0,
+        timer_started: false
       })
 
     {:ok, state}
@@ -138,15 +140,12 @@ defmodule Membrane.Element.GCloud.SpeechToText do
   end
 
   @impl true
-  def handle_playing_to_prepared(ctx, state) do
-    actions =
-      if ctx.pads.input.end_of_stream? do
-        []
-      else
-        [stop_timer: :demand_timer]
-      end
+  def handle_playing_to_prepared(_ctx, %{timer_started: true} = state) do
+    {{:ok, stop_timer: @timer_name}, state}
+  end
 
-    {{:ok, actions}, state}
+  def handle_playing_to_prepared(_ctx, %{timer_started: false} = state) do
+    {:ok, state}
   end
 
   @impl true
@@ -180,7 +179,7 @@ defmodule Membrane.Element.GCloud.SpeechToText do
     avg_samples_num = round((caps.min_block_size + caps.max_block_size) / 2)
     demand_interval = samples_to_time(avg_samples_num, caps) * @demand_frames
 
-    {{:ok, start_timer: {:demand_timer, demand_interval}}, state}
+    {{:ok, start_timer: {@timer_name, demand_interval}}, %{state | timer_started: true}}
   end
 
   @impl true
@@ -212,7 +211,12 @@ defmodule Membrane.Element.GCloud.SpeechToText do
   def handle_end_of_stream(:input, _ctx, state) do
     info("End of Stream")
     :ok = state.client.pid |> Client.end_stream()
-    {{:ok, stop_timer: :demand_timer}, state}
+
+    if state.timer_started do
+      {{:ok, stop_timer: @timer_name}, %{state | timer_started: false}}
+    else
+      {:ok, state}
+    end
   end
 
   @impl true
