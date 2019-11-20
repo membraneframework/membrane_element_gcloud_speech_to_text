@@ -25,7 +25,7 @@ defmodule RecognitionPipeline do
       {:parser, :output} => {:sink, :input}
     }
 
-    spec = %Membrane.Pipeline.Spec{
+    spec = %Membrane.ParentSpec{
       children: children,
       links: links
     }
