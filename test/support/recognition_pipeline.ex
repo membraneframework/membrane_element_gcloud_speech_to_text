@@ -2,12 +2,12 @@ defmodule RecognitionPipeline do
   use Membrane.Pipeline
 
   alias Google.Cloud.Speech.V1.StreamingRecognizeResponse
-  alias Membrane.Element.{File, FLACParser, GCloud}
+  alias Membrane.Element.{FLACParser, GCloud}
 
   @impl true
   def handle_init([file, target, opts]) do
     children = [
-      src: %File.Source{location: file},
+      src: %Membrane.File.Source{location: file},
       parser: FLACParser,
       sink:
         struct!(
@@ -34,17 +34,19 @@ defmodule RecognitionPipeline do
   end
 
   @impl true
-  def handle_notification(%StreamingRecognizeResponse{} = response, _element, state) do
+  def handle_notification(%StreamingRecognizeResponse{} = response, _element, _ctx, state) do
     send(state.target, response)
     {:ok, state}
   end
 
-  def handle_notification({:end_of_stream, _pad}, :sink, state) do
+  @impl true
+  def handle_notification({:end_of_stream, _pad}, :sink, _ctx, state) do
     send(state.target, :end_of_upload)
     {:ok, state}
   end
 
-  def handle_notification(_notification, _element, state) do
+  @impl true
+  def handle_notification(_notification, _element, _ctx, state) do
     {:ok, state}
   end
 end

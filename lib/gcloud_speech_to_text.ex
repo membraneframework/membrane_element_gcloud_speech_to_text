@@ -253,7 +253,7 @@ defmodule Membrane.Element.GCloud.SpeechToText do
       else
         received_end_time =
           response.results
-          |> Enum.map(&(&1.result_end_time |> Time.nanosecond()))
+          |> Enum.map(&(&1.result_end_time |> Time.nanoseconds()))
           |> Enum.max()
 
         delay = streamed_audio_time - received_end_time
@@ -374,7 +374,7 @@ defmodule Membrane.Element.GCloud.SpeechToText do
     info("Old client #{inspect(pid)} down with reason #{inspect(reason)}")
     caps = ctx.pads.input.caps
 
-    limit = 1 |> Time.second() |> time_to_samples(caps)
+    limit = Time.second() |> time_to_samples(caps)
     unrecognized_samples = dead_client.backup_queue |> SamplesQueue.samples()
 
     if unrecognized_samples > limit do
@@ -443,12 +443,12 @@ defmodule Membrane.Element.GCloud.SpeechToText do
   end
 
   defp samples_to_time(samples, %FLAC{} = caps) do
-    (samples * Time.second(1)) |> div(caps.sample_rate)
+    (samples * Time.second()) |> div(caps.sample_rate)
   end
 
   defp time_to_samples(time, %FLAC{} = caps) do
     (time * caps.sample_rate)
-    |> div(1 |> Time.second())
+    |> div(Time.second())
   end
 
   defp client_start_stream(client, caps, state) do

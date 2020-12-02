@@ -8,7 +8,7 @@ defmodule Membrane.Element.GCloud.SpeechToText.IntegrationTest do
     WordInfo
   }
 
-  alias Membrane.Element.{File, FLACParser, GCloud}
+  alias Membrane.{FLACParser, GCloud}
   alias Membrane.Time
   alias Membrane.Testing
 
@@ -22,7 +22,7 @@ defmodule Membrane.Element.GCloud.SpeechToText.IntegrationTest do
   defp testing_pipeline(recognition_opts) do
     Testing.Pipeline.start_link(%Testing.Pipeline.Options{
       elements: [
-        src: %File.Source{location: @fixture_path},
+        src: %Membrane.File.Source{location: @fixture_path},
         parser: FLACParser,
         sink:
           struct!(

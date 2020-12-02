@@ -73,12 +73,13 @@ defmodule SpeechRecognition do
   end
 
   @impl true
-  def handle_notification(%StreamingRecognizeResponse{} = response, _element, state) do
+  def handle_notification(%StreamingRecognizeResponse{} = response, _element, _ctx, state) do
     IO.inspect(response)
     {:ok, state}
   end
 
-  def handle_notification(_notification, _element, state) do
+  @impl true
+  def handle_notification(_notification, _element, _ctx, state) do
     {:ok, state}
   end
 end
