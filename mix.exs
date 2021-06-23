@@ -40,7 +40,7 @@ defmodule Membrane.Element.GCloud.SpeechToText.MixProject do
       {:membrane_caps_audio_flac, "~> 0.1.1"},
       {:gcloud_speech_grpc, "~> 0.4.0"},
       {:qex, "~> 0.5"},
-      {:ex_doc, "~> 0.21", only: :dev, runtime: false},
+      {:ex_doc, "~> 0.24", only: :dev, runtime: false},
       {:dialyxir, "~> 1.0.0", only: :dev, runtime: false},
       {:membrane_file_plugin, "~> 0.6.0", only: [:dev, :test]},
       {:membrane_element_flac_parser, "~> 0.5.0", only: [:dev, :test]}
