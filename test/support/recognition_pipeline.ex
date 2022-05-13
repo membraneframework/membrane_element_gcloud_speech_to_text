@@ -1,4 +1,5 @@
 defmodule RecognitionPipeline do
+  @moduledoc false
   use Membrane.Pipeline
 
   alias Google.Cloud.Speech.V1.StreamingRecognizeResponse

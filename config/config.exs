@@ -1,4 +1,4 @@
-use Mix.Config
+import Config
 
 creds_path = Path.expand("./creds.json", __DIR__)
 
