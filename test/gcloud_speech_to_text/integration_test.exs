@@ -33,6 +33,7 @@ defmodule Membrane.Element.GCloud.SpeechToText.IntegrationTest do
           ] ++ recognition_opts
         )
     ]
+
     Testing.Pipeline.start_link(links: Membrane.ParentSpec.link_linear(children))
   end
 
@@ -78,7 +79,6 @@ defmodule Membrane.Element.GCloud.SpeechToText.IntegrationTest do
                streaming_time_limit: streaming_time_limit,
                reconnection_overlap_time: 2 |> Time.seconds()
              )
-
 
     assert_end_of_stream(pid, :sink, :input, 10_000)
 
