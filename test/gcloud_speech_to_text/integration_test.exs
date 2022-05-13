@@ -1,18 +1,18 @@
 defmodule Membrane.Element.GCloud.SpeechToText.IntegrationTest do
   use ExUnit.Case
 
+  import Membrane.Testing.Assertions
+
   alias Google.Cloud.Speech.V1.{
-    StreamingRecognizeResponse,
-    StreamingRecognitionResult,
     SpeechRecognitionAlternative,
+    StreamingRecognitionResult,
+    StreamingRecognizeResponse,
     WordInfo
   }
 
   alias Membrane.{FLACParser, GCloud}
-  alias Membrane.Time
   alias Membrane.Testing
-
-  import Membrane.Testing.Assertions
+  alias Membrane.Time
 
   @moduletag :external
 
@@ -20,26 +20,25 @@ defmodule Membrane.Element.GCloud.SpeechToText.IntegrationTest do
   @fixture_duration 7_270 |> Time.milliseconds() |> Time.to_nanoseconds()
 
   defp testing_pipeline(recognition_opts) do
-    Testing.Pipeline.start_link(%Testing.Pipeline.Options{
-      elements: [
-        src: %Membrane.File.Source{location: @fixture_path},
-        parser: FLACParser,
-        sink:
-          struct!(
-            GCloud.SpeechToText,
-            [
-              language_code: "en-GB",
-              word_time_offsets: true,
-              interim_results: false
-            ] ++ recognition_opts
-          )
-      ]
-    })
+    children = [
+      src: %Membrane.File.Source{location: @fixture_path},
+      parser: FLACParser,
+      sink:
+        struct!(
+          GCloud.SpeechToText,
+          [
+            language_code: "en-GB",
+            word_time_offsets: true,
+            interim_results: false
+          ] ++ recognition_opts
+        )
+    ]
+
+    Testing.Pipeline.start_link(links: Membrane.ParentSpec.link_linear(children))
   end
 
   test "recognition pipeline provides transcription of short file" do
     assert {:ok, pid} = testing_pipeline([])
-    assert :ok = Testing.Pipeline.play(pid)
 
     assert_end_of_stream(pid, :sink, :input, 10_000)
 
@@ -80,8 +79,6 @@ defmodule Membrane.Element.GCloud.SpeechToText.IntegrationTest do
                streaming_time_limit: streaming_time_limit,
                reconnection_overlap_time: 2 |> Time.seconds()
              )
-
-    assert :ok = Testing.Pipeline.play(pid)
 
     assert_end_of_stream(pid, :sink, :input, 10_000)
 

@@ -15,13 +15,11 @@ defmodule Membrane.Element.GCloud.SpeechToText do
   """
 
   use Membrane.Sink
-  use Membrane.Log, tags: :membrane_element_gcloud_stt
+  require Membrane.Logger
 
+  alias GCloud.SpeechAPI.Streaming.Client
   alias Membrane.Buffer
   alias Membrane.Caps.Audio.FLAC
-  alias Membrane.Time
-  alias GCloud.SpeechAPI.Streaming.Client
-
   alias Membrane.Element.GCloud.SpeechToText.SamplesQueue
 
   alias Google.Cloud.Speech.V1.{
@@ -31,6 +29,8 @@ defmodule Membrane.Element.GCloud.SpeechToText do
     StreamingRecognizeRequest,
     StreamingRecognizeResponse
   }
+
+  alias Membrane.Time
 
   def_input_pad :input,
     caps: FLAC,
@@ -209,7 +209,7 @@ defmodule Membrane.Element.GCloud.SpeechToText do
 
   @impl true
   def handle_end_of_stream(:input, _ctx, state) do
-    info("End of Stream")
+    Membrane.Logger.info("End of Stream")
     :ok = state.client.pid |> Client.end_stream()
 
     if state.timer_started do
@@ -258,13 +258,15 @@ defmodule Membrane.Element.GCloud.SpeechToText do
 
         delay = streamed_audio_time - received_end_time
 
-        info("#{log_prefix} Recognize response delay: #{delay |> Time.to_milliseconds()} ms")
+        Membrane.Logger.info(
+          "#{log_prefix} Recognize response delay: #{delay |> Time.to_milliseconds()} ms"
+        )
 
         update_client_queue(state, from, caps, received_end_time)
       end
 
     if response.error != nil do
-      warn("#{log_prefix}: #{inspect(response.error)}")
+      Membrane.Logger.warn("#{log_prefix}: #{inspect(response.error)}")
 
       {:ok, state}
     else
@@ -327,7 +329,7 @@ defmodule Membrane.Element.GCloud.SpeechToText do
       monitor |> Process.demonitor([:flush])
       pid |> Client.stop()
 
-      info(
+      Membrane.Logger.info(
         "Stopped client: #{inspect(pid)}, " <>
           "current old_client: #{inspect(state.old_client && state.old_client.pid)}"
       )
@@ -351,7 +353,7 @@ defmodule Membrane.Element.GCloud.SpeechToText do
         ctx,
         %{client: %{pid: pid} = dead_client} = state
       ) do
-    warn("Client #{inspect(pid)} down with reason: #{inspect(reason)}")
+    Membrane.Logger.warn("Client #{inspect(pid)} down with reason: #{inspect(reason)}")
     caps = ctx.pads.input.caps
 
     client = start_client(caps, dead_client.queue_start, dead_client.backup_queue)
@@ -371,14 +373,17 @@ defmodule Membrane.Element.GCloud.SpeechToText do
         ctx,
         %{old_client: %{pid: pid} = dead_client} = state
       ) do
-    info("Old client #{inspect(pid)} down with reason #{inspect(reason)}")
+    Membrane.Logger.info("Old client #{inspect(pid)} down with reason #{inspect(reason)}")
     caps = ctx.pads.input.caps
 
     limit = Time.second() |> time_to_samples(caps)
     unrecognized_samples = dead_client.backup_queue |> SamplesQueue.samples()
 
     if unrecognized_samples > limit do
-      info("Restarting old client #{inspect(pid)} from #{inspect(dead_client.queue_start)}}")
+      Membrane.Logger.info(
+        "Restarting old client #{inspect(pid)} from #{inspect(dead_client.queue_start)}}"
+      )
+
       client = start_client(caps, dead_client.queue_start, dead_client.backup_queue)
 
       state = %{state | old_client: client}
@@ -395,7 +400,7 @@ defmodule Membrane.Element.GCloud.SpeechToText do
       {:ok, state}
     else
       # We're close enough to the end, don't restart the client
-      info(
+      Membrane.Logger.info(
         "Not restarting old client #{inspect(pid)}, it (most likely) received all transcriptions"
       )
 
@@ -429,7 +434,7 @@ defmodule Membrane.Element.GCloud.SpeechToText do
 
     monitor = Process.monitor(client_pid)
 
-    info(
+    Membrane.Logger.info(
       "Started new client: #{inspect(client_pid)}, " <>
         "start_time: #{start_time |> Time.to_milliseconds()}"
     )
