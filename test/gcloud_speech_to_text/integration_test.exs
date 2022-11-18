@@ -17,13 +17,16 @@ defmodule Membrane.Element.GCloud.SpeechToText.IntegrationTest do
   @moduletag :external
 
   @fixture_path "../fixtures/sample.flac" |> Path.expand(__DIR__)
-  @fixture_duration 7_270 |> Time.milliseconds() |> Time.to_nanoseconds()
+  @fixture_duration 7_270 |> Time.milliseconds() |> Time.as_nanoseconds()
 
   defp testing_pipeline(recognition_opts) do
-    children = [
-      src: %Membrane.File.Source{location: @fixture_path},
-      parser: FLACParser,
-      sink:
+    import Membrane.ChildrenSpec
+
+    links = [
+      child(:src, %Membrane.File.Source{location: @fixture_path})
+      |> child(:parser, FLACParser)
+      |> child(
+        :sink,
         struct!(
           GCloud.SpeechToText,
           [
@@ -32,9 +35,10 @@ defmodule Membrane.Element.GCloud.SpeechToText.IntegrationTest do
             interim_results: false
           ] ++ recognition_opts
         )
+      )
     ]
 
-    Testing.Pipeline.start_link(links: Membrane.ParentSpec.link_linear(children))
+    Testing.Pipeline.start_link(construct: links)
   end
 
   test "recognition pipeline provides transcription of short file" do
@@ -86,8 +90,8 @@ defmodule Membrane.Element.GCloud.SpeechToText.IntegrationTest do
     assert response.error == nil
     assert [%StreamingRecognitionResult{} = res] = response.results
     assert res.is_final == true
-    delta = 150 |> Time.milliseconds() |> Time.to_nanoseconds()
-    assert_in_delta res.result_end_time, streaming_time_limit |> Time.to_nanoseconds(), delta
+    delta = 150 |> Time.milliseconds() |> Time.as_nanoseconds()
+    assert_in_delta res.result_end_time, streaming_time_limit |> Time.as_nanoseconds(), delta
     assert [%SpeechRecognitionAlternative{} = alt] = res.alternatives
 
     assert alt.transcript ==
@@ -108,7 +112,7 @@ defmodule Membrane.Element.GCloud.SpeechToText.IntegrationTest do
     assert response.error == nil
     assert [%StreamingRecognitionResult{} = res] = response.results
     assert res.is_final == true
-    assert_in_delta res.result_end_time, @fixture_duration |> Time.to_nanoseconds(), delta
+    assert_in_delta res.result_end_time, @fixture_duration |> Time.as_nanoseconds(), delta
     assert [%SpeechRecognitionAlternative{} = alt] = res.alternatives
 
     assert alt.transcript =~ "of Sherlock Holmes by Sir Arthur Conan Doyle"
