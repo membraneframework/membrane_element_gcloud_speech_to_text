@@ -18,8 +18,7 @@ defmodule RecognitionPipeline do
       )
 
     spec = [
-      child(:src, %Membrane.File.Source{location: file}),
-      get_child(:src)
+      child(:src, %Membrane.File.Source{location: file})
       |> child(:parser, FLACParser)
       |> child(:sink, sink)
     ]

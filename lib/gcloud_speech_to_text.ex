@@ -37,7 +37,7 @@ defmodule Membrane.Element.GCloud.SpeechToText do
     demand_unit: :buffers
 
   def_options language_code: [
-                type: :string,
+                spec: String.t(),
                 default: "en-US",
                 description: """
                 The language of the supplied audio.
@@ -46,7 +46,7 @@ defmodule Membrane.Element.GCloud.SpeechToText do
                 """
               ],
               interim_results: [
-                type: :boolean,
+                spec: boolean(),
                 default: false,
                 description: """
                 If set to true, the interim results may be returned by recognition API.
@@ -55,14 +55,13 @@ defmodule Membrane.Element.GCloud.SpeechToText do
                 """
               ],
               word_time_offsets: [
-                type: :boolean,
+                spec: boolean(),
                 default: false,
                 description: """
                 If `true`, the top result includes a list of words and the start and end time offsets (timestamps) for those words.
                 """
               ],
               speech_contexts: [
-                type: :list,
                 spec: [%SpeechContext{}],
                 default: [],
                 description: """
@@ -71,7 +70,6 @@ defmodule Membrane.Element.GCloud.SpeechToText do
                 """
               ],
               model: [
-                type: :atom,
                 spec: :default | :video | :phone_call | :command_and_search,
                 default: :default,
                 description: """
@@ -80,7 +78,7 @@ defmodule Membrane.Element.GCloud.SpeechToText do
                 """
               ],
               streaming_time_limit: [
-                type: :time,
+                spec: Time.t(),
                 default: 200 |> Time.seconds(),
                 description: """
                 Determines how much audio can be sent to recognition API in one
@@ -94,7 +92,7 @@ defmodule Membrane.Element.GCloud.SpeechToText do
                 """
               ],
               results_await_time: [
-                type: :time,
+                spec: Time.t(),
                 default: 90 |> Time.seconds(),
                 description: """
                 The amount of time a client that stopped streaming is kept alive
@@ -102,7 +100,7 @@ defmodule Membrane.Element.GCloud.SpeechToText do
                 """
               ],
               reconnection_overlap_time: [
-                type: :time,
+                spec: Time.t(),
                 default: 2 |> Time.seconds(),
                 description: """
                 Duration of audio re-sent in a new client session after reconnection

@@ -10,7 +10,7 @@ defmodule Membrane.Element.GCloud.SpeechToText.IntegrationTest do
     WordInfo
   }
 
-  alias Membrane.{FLACParser, GCloud}
+  alias Membrane.Element.{FLACParser, GCloud}
   alias Membrane.Testing
   alias Membrane.Time
 
@@ -38,11 +38,11 @@ defmodule Membrane.Element.GCloud.SpeechToText.IntegrationTest do
       )
     ]
 
-    Testing.Pipeline.start_link(construct: links)
+    Testing.Pipeline.start_link_supervised!(construct: links)
   end
 
   test "recognition pipeline provides transcription of short file" do
-    assert {:ok, pid} = testing_pipeline([])
+    assert pid = testing_pipeline([])
 
     assert_end_of_stream(pid, :sink, :input, 10_000)
 
@@ -78,7 +78,7 @@ defmodule Membrane.Element.GCloud.SpeechToText.IntegrationTest do
   test "recognition pipeline uses overlap when reconnecting" do
     streaming_time_limit = 6 |> Time.seconds()
 
-    assert {:ok, pid} =
+    assert pid =
              testing_pipeline(
                streaming_time_limit: streaming_time_limit,
                reconnection_overlap_time: 2 |> Time.seconds()
