@@ -45,8 +45,7 @@ defmodule Membrane.Element.GCloud.SpeechToText.MixProject do
       {:ex_doc, ">= 0.0.0", only: :dev, runtime: false},
       {:dialyxir, ">= 0.0.0", only: :dev, runtime: false},
       {:membrane_file_plugin, "~> 0.13.0", only: :test},
-      {:membrane_flac_plugin,
-       github: "membraneframework/membrane_flac_plugin", branch: "update_core_0_11_0", only: :test}
+      {:membrane_flac_plugin, "~> 0.9.0", only: :test}
     ]
   end
 
