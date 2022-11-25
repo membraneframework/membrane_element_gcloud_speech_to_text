@@ -6,48 +6,40 @@ defmodule RecognitionPipeline do
   alias Membrane.Element.{FLACParser, GCloud}
 
   @impl true
-  def handle_init([file, target, opts]) do
-    children = [
-      src: %Membrane.File.Source{location: file},
-      parser: FLACParser,
-      sink:
-        struct!(
-          GCloud.SpeechToText,
-          [
-            language_code: "en-GB",
-            word_time_offsets: true,
-            interim_results: false
-          ] ++ opts
-        )
+  def handle_init(_ctx, [file, target, opts]) do
+    sink =
+      struct!(
+        GCloud.SpeechToText,
+        [
+          language_code: "en-GB",
+          word_time_offsets: true,
+          interim_results: false
+        ] ++ opts
+      )
+
+    spec = [
+      child(:src, %Membrane.File.Source{location: file})
+      |> child(:parser, FLACParser)
+      |> child(:sink, sink)
     ]
 
-    links = %{
-      {:src, :output} => {:parser, :input},
-      {:parser, :output} => {:sink, :input}
-    }
-
-    spec = %Membrane.ParentSpec{
-      children: children,
-      links: links
-    }
-
-    {{:ok, spec: spec}, %{target: target}}
+    {[spec: spec], %{target: target}}
   end
 
   @impl true
-  def handle_notification(%StreamingRecognizeResponse{} = response, _element, _ctx, state) do
+  def handle_child_notification(%StreamingRecognizeResponse{} = response, _element, _ctx, state) do
     send(state.target, response)
-    {:ok, state}
+    {[], state}
   end
 
   @impl true
-  def handle_notification({:end_of_stream, _pad}, :sink, _ctx, state) do
+  def handle_child_notification({:end_of_stream, _pad}, :sink, _ctx, state) do
     send(state.target, :end_of_upload)
-    {:ok, state}
+    {[], state}
   end
 
   @impl true
-  def handle_notification(_notification, _element, _ctx, state) do
-    {:ok, state}
+  def handle_child_notification(_notification, _element, _ctx, state) do
+    {[], state}
   end
 end

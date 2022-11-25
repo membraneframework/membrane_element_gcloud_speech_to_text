@@ -1,7 +1,7 @@
 # Membrane Multimedia Framework: GCloud Speech To Text
 
 [![Hex.pm](https://img.shields.io/hexpm/v/membrane_element_gcloud_speech_to_text.svg)](https://hex.pm/packages/membrane_element_gcloud_speech_to_text)
-[![CircleCI](https://circleci.com/gh/membraneframework/membrane-element-gcloud-speech-to-text.svg?style=svg)](https://circleci.com/gh/membraneframework/membrane-element-gcloud-speech-to-text)
+[![CircleCI](https://circleci.com/gh/membraneframework/membrane_element_gcloud_speech_to_text.svg?style=svg)](https://circleci.com/gh/membraneframework/membrane_element_gcloud_speech_to_text)
 
 This package provides a Sink wrapping [Google Cloud Speech To Text Streaming API client](https://hex.pm/packages/gcloud_speech_grpc).
 Currently supports only audio streams in FLAC format.
@@ -15,7 +15,7 @@ The package can be installed by adding `membrane_element_gcloud_speech_to_text` 
 ```elixir
 def deps do
   [
-    {:membrane_element_gcloud_speech_to_text, "~> 0.7.0"}
+    {:membrane_element_gcloud_speech_to_text, "~> 0.8.0"}
   ]
 end
 ```
@@ -49,38 +49,29 @@ defmodule SpeechRecognition do
 
   @impl true
   def handle_init(_) do
-    children = [
-      src: %File.Source{location: "sample.flac"},
-      parser: FLACParser,
-      sink: %GCloud.SpeechToText{
+    
+    
+    links = [child(:src, %File.Source{location: "sample.flac"})
+    |> child(:parser, FLACParser)
+    |> child(:sink, %GCloud.SpeechToText{
         interim_results: false,
         language_code: "en-GB",
         word_time_offsets: true
-      }
+      })
     ]
 
-    links = %{
-      {:src, :output} => {:parser, :input},
-      {:parser, :output} => {:sink, :input}
-    }
-
-    spec = %Membrane.Pipeline.Spec{
-      children: children,
-      links: links
-    }
-
-    {{:ok, spec}, %{}}
+    {[spec: links], %{}}
   end
 
   @impl true
   def handle_notification(%StreamingRecognizeResponse{} = response, _element, _ctx, state) do
     IO.inspect(response)
-    {:ok, state}
+    {[], state}
   end
 
   @impl true
   def handle_notification(_notification, _element, _ctx, state) do
-    {:ok, state}
+    {[], state}
   end
 end
 ```
@@ -89,10 +80,10 @@ The pipeline also requires [a config file](#configuration) and the following dep
 
 ```elixir
 [
-  {:membrane_core, "~> 0.8.0"},
-  {:membrane_file_plugin, "~> 0.7.0"},
-  {:membrane_flac_plugin, "~> 0.7.0"},
-  {:membrane_element_gcloud_speech_to_text, "~> 0.7.0"}
+  {:membrane_core, "~> 0.11.0"},
+  {:membrane_file_plugin, "~> 0.13.0"},
+  {:membrane_flac_plugin, "~> 0.9.0"},
+  {:membrane_element_gcloud_speech_to_text, "~> 0.8.0"}
 ]
 ```
 
