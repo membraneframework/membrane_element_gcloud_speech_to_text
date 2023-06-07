@@ -83,7 +83,7 @@ The pipeline also requires [a config file](#configuration) and the following dep
   {:membrane_core, "~> 0.11.0"},
   {:membrane_file_plugin, "~> 0.13.0"},
   {:membrane_flac_plugin, "~> 0.9.0"},
-	{:membrane_element_gcloud_speech_to_text, "~> 0.9.0"}
+  {:membrane_element_gcloud_speech_to_text, "~> 0.9.0"}
 ]
 ```
 
