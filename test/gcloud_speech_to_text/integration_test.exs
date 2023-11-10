@@ -10,7 +10,7 @@ defmodule Membrane.Element.GCloud.SpeechToText.IntegrationTest do
     WordInfo
   }
 
-  alias Membrane.Element.{FLACParser, GCloud}
+  alias Membrane.Element.GCloud
   alias Membrane.Testing
   alias Membrane.Time
 
@@ -22,9 +22,9 @@ defmodule Membrane.Element.GCloud.SpeechToText.IntegrationTest do
   defp testing_pipeline(recognition_opts) do
     import Membrane.ChildrenSpec
 
-    links = [
+    spec = [
       child(:src, %Membrane.File.Source{location: @fixture_path})
-      |> child(:parser, FLACParser)
+      |> child(:parser, Membrane.FLAC.Parser)
       |> child(
         :sink,
         struct!(
@@ -38,7 +38,7 @@ defmodule Membrane.Element.GCloud.SpeechToText.IntegrationTest do
       )
     ]
 
-    Testing.Pipeline.start_link_supervised!(construct: links)
+    Testing.Pipeline.start_link_supervised!(spec: spec)
   end
 
   test "recognition pipeline provides transcription of short file" do

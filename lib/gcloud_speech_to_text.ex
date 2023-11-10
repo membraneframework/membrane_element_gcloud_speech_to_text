@@ -17,10 +17,8 @@ defmodule Membrane.Element.GCloud.SpeechToText do
   use Membrane.Sink
   require Membrane.Logger
 
+  alias __MODULE__.SamplesQueue
   alias GCloud.SpeechAPI.Streaming.Client
-  alias Membrane.Buffer
-  alias Membrane.Caps.Audio.FLAC
-  alias Membrane.Element.GCloud.SpeechToText.SamplesQueue
 
   alias Google.Cloud.Speech.V1.{
     RecognitionConfig,
@@ -30,10 +28,12 @@ defmodule Membrane.Element.GCloud.SpeechToText do
     StreamingRecognizeResponse
   }
 
+  alias Membrane.FLAC
   alias Membrane.Time
 
   def_input_pad :input,
     accepted_format: FLAC,
+    flow_control: :manual,
     demand_unit: :buffers
 
   def_options language_code: [
@@ -172,20 +172,14 @@ defmodule Membrane.Element.GCloud.SpeechToText do
   end
 
   @impl true
-  def handle_write_list(:input, buffer_list, _ctx, state) do
-    {payloads, buffers_samples} =
-      buffer_list
-      |> Enum.map_reduce(0, fn %Buffer{payload: payload, metadata: metadata}, acc ->
-        samples = metadata |> Map.get(:samples, 0)
-        {payload, acc + samples}
-      end)
+  def handle_buffer(:input, buffer, _ctx, state) do
+    buffer_samples = Map.get(buffer.metadata, :samples, 0)
+    audio_content = buffer.payload
 
-    audio_content = Enum.join(payloads)
-
-    state = %{state | samples: state.samples + buffers_samples}
+    state = %{state | samples: state.samples + buffer_samples}
 
     state =
-      update_in(state.client.backup_queue, &SamplesQueue.push(&1, audio_content, buffers_samples))
+      update_in(state.client.backup_queue, &SamplesQueue.push(&1, audio_content, buffer_samples))
 
     :ok =
       Client.send_request(
@@ -255,7 +249,7 @@ defmodule Membrane.Element.GCloud.SpeechToText do
       end
 
     if response.error != nil do
-      Membrane.Logger.warn("#{log_prefix}: #{inspect(response.error)}")
+      Membrane.Logger.warning("#{log_prefix}: #{inspect(response.error)}")
 
       {[], state}
     else
@@ -342,7 +336,7 @@ defmodule Membrane.Element.GCloud.SpeechToText do
         ctx,
         %{client: %{pid: pid} = dead_client} = state
       ) do
-    Membrane.Logger.warn("Client #{inspect(pid)} down with reason: #{inspect(reason)}")
+    Membrane.Logger.warning("Client #{inspect(pid)} down with reason: #{inspect(reason)}")
     stream_format = ctx.pads.input.stream_format
 
     client = start_client(stream_format, dead_client.queue_start, dead_client.backup_queue)
