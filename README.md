@@ -15,7 +15,7 @@ The package can be installed by adding `membrane_element_gcloud_speech_to_text` 
 ```elixir
 def deps do
   [
-	{:membrane_element_gcloud_speech_to_text, "~> 0.10.0"}
+    {:membrane_element_gcloud_speech_to_text, "~> 0.10.0"}
   ]
 end
 ```
