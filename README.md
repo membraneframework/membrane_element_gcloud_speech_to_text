@@ -15,7 +15,7 @@ The package can be installed by adding `membrane_element_gcloud_speech_to_text` 
 ```elixir
 def deps do
   [
-	{:membrane_element_gcloud_speech_to_text, "~> 0.10.0"}
+	  {:membrane_element_gcloud_speech_to_text, "~> 0.10.0"}
   ]
 end
 ```
@@ -45,32 +45,29 @@ defmodule SpeechRecognition do
   use Membrane.Pipeline
 
   alias Google.Cloud.Speech.V1.StreamingRecognizeResponse
-  alias Membrane.Element.{File, FLACParser, GCloud}
 
   @impl true
-  def handle_init(_) do
-    
-    
-    links = [child(:src, %File.Source{location: "sample.flac"})
-    |> child(:parser, FLACParser)
-    |> child(:sink, %GCloud.SpeechToText{
-        interim_results: false,
-        language_code: "en-GB",
-        word_time_offsets: true
-      })
-    ]
+  def handle_init(_ctx, _options) do
+    spec =
+      child(%Membrane.File.Source{location: "sample.flac"})
+      |> child(Membrane.FLAC.Parser)
+      |> child(%Membrane.Element.GCloud.SpeechToText{
+          interim_results: false,
+          language_code: "en-GB",
+          word_time_offsets: true
+        })
 
     {[spec: links], %{}}
   end
 
   @impl true
-  def handle_notification(%StreamingRecognizeResponse{} = response, _element, _ctx, state) do
+  def handle_child_notification(%StreamingRecognizeResponse{} = response, _element, _ctx, state) do
     IO.inspect(response)
     {[], state}
   end
 
   @impl true
-  def handle_notification(_notification, _element, _ctx, state) do
+  def handle_child_notification(_notification, _element, _ctx, state) do
     {[], state}
   end
 end
@@ -80,9 +77,9 @@ The pipeline also requires [a config file](#configuration) and the following dep
 
 ```elixir
 [
-  {:membrane_core, "~> 0.11.0"},
-  {:membrane_file_plugin, "~> 0.13.0"},
-  {:membrane_flac_plugin, "~> 0.9.0"},
+  {:membrane_core, "~> 1.0"},
+  {:membrane_file_plugin, "~> 0.16.0"},
+  {:membrane_flac_plugin, "~> 0.11.0"},
 	{:membrane_element_gcloud_speech_to_text, "~> 0.10.0"}
 ]
 ```
