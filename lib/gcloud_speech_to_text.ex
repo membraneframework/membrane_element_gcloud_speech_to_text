@@ -17,9 +17,8 @@ defmodule Membrane.Element.GCloud.SpeechToText do
   use Membrane.Sink
   require Membrane.Logger
 
+  alias __MODULE__.SamplesQueue
   alias GCloud.SpeechAPI.Streaming.Client
-  alias Membrane.FLAC
-  alias Membrane.Element.GCloud.SpeechToText.SamplesQueue
 
   alias Google.Cloud.Speech.V1.{
     RecognitionConfig,
@@ -29,6 +28,7 @@ defmodule Membrane.Element.GCloud.SpeechToText do
     StreamingRecognizeResponse
   }
 
+  alias Membrane.FLAC
   alias Membrane.Time
 
   def_input_pad :input,
