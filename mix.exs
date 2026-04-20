@@ -37,13 +37,14 @@ defmodule Membrane.Element.GCloud.SpeechToText.MixProject do
 
   defp deps do
     [
+      {:gun, "~> 2.2.0", override: true},
       {:membrane_core, "~> 1.0"},
       {:membrane_flac_format, "~> 0.2.0"},
       {:gcloud_speech_grpc, "~> 0.4.0"},
       {:qex, "~> 0.5"},
-      {:credo, ">= 0.0.0", only: :dev, runtime: false},
-      {:ex_doc, ">= 0.0.0", only: :dev, runtime: false},
-      {:dialyxir, ">= 0.0.0", only: :dev, runtime: false},
+      {:credo, "~> 1.7", only: :dev, runtime: false},
+      {:ex_doc, "~> 0.34", only: :dev, runtime: false},
+      {:dialyxir, "~> 1.4", only: :dev, runtime: false},
       {:membrane_file_plugin, "~> 0.16.0", only: :test},
       {:membrane_flac_plugin, "~> 0.11.0", only: :test}
     ]
@@ -72,11 +73,13 @@ defmodule Membrane.Element.GCloud.SpeechToText.MixProject do
 
   defp dialyzer() do
     opts = [
-      flags: [:error_handling]
+      flags: [:error_handling],
+      plt_add_apps: [:syntax_tools]
     ]
 
     if System.get_env("CI") == "true" do
       # Store PLTs in cacheable directory for CI
+      File.mkdir_p!(Path.join([__DIR__, "priv", "plts"]))
       [plt_local_path: "priv/plts", plt_core_path: "priv/plts"] ++ opts
     else
       opts

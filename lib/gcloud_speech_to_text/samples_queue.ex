@@ -68,7 +68,7 @@ defmodule Membrane.Element.GCloud.SpeechToText.SamplesQueue do
 
   defp pop_until_limit(%__MODULE__{total: total_samples, limit: limit} = tq)
        when total_samples > limit do
-    {{samples, _}, q} = Qex.pop!(tq.q)
+    {{samples, _x}, q} = Qex.pop!(tq.q)
     %{tq | q: q, total: total_samples - samples} |> pop_until_limit()
   end
 
