@@ -8,7 +8,7 @@ defmodule Membrane.Element.GCloud.SpeechToText.SamplesQueue do
   defstruct q: Qex.new(), total: 0, limit: :infinity
 
   @opaque t :: %__MODULE__{
-            q: Qex.t({samples_num(), Payload.t()}),
+            q: Qex.t(),
             total: samples_num(),
             limit: :infinity | samples_num()
           }
