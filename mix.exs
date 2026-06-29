@@ -43,7 +43,7 @@ defmodule Membrane.Element.GCloud.SpeechToText.MixProject do
       {:gcloud_speech_grpc, "~> 0.4.0"},
       {:qex, "~> 0.5"},
       {:credo, ">= 0.0.0", only: :dev, runtime: false},
-      {:ex_doc, "~> 0.40", only: :dev, runtime: false},
+      {:ex_doc, ">= 0.40.0", only: :dev, runtime: false},
       {:dialyxir, ">= 0.0.0", only: :dev, runtime: false},
       {:membrane_file_plugin, "~> 0.16.0", only: :test},
       {:membrane_flac_plugin, "~> 0.11.0", only: :test}
